@@ -49,34 +49,19 @@ LN3Diff is a feedforward 3D diffusion model that creates high-quality 3D object 
 <tr></tr>
 <tr>
     <td>
-        <video width="100%" controls loop autoplay muted>
-        <source src="assets/t23d/standing-hund.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-        </video> 
+        <img src="assets/t23d/standing-hund.gif">
     </td>
     <td>
-        <video width="100%" controls loop autoplay muted>
-        <source src="assets/t23d/ufo.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-        </video> 
+        <img src="assets/t23d/ufo.gif">
     </td>
     <td>
-        <video width="100%" controls loop autoplay muted>
-        <source src="assets/t23d/mast.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-        </video> 
+        <img src="assets/t23d/mast.gif">
     </td>
     <td>
-        <video width="100%" controls loop autoplay muted>
-        <source src="assets/t23d/cannon.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-        </video> 
+        <img src="assets/t23d/cannon.gif">
     </td>
     <td>
-        <video width="100%" controls loop autoplay muted>
-        <source src="assets/t23d/blue-plastic-chair.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-        </video> 
+        <img src="assets/t23d/blue-plastic-chair.gif">
     </td>
 </tr>
 
