@@ -89,15 +89,15 @@ Self-supervised Geometry-Aware Encoder for Style-based 3d GAN Inversion. -->
 
 ---
 
-<h4 align="center">
-  <a href="https://nirvanalan.github.io/projects/E3DGE/index.html" target='_blank'>[Project Page]</a> 
+<!-- <h4 align="center">
+  <a href="https://nirvanalan.github.io/projects/E3DGE/index.html" target='_blank'>[Project Page]</a>  -->
   <!-- • -->
   <!-- <a href="https://arxiv.org/abs/2212.07409" target='_blank'>[arXiv]</a> 
   • -->
   <!-- <a href="https://drive.google.com/file/d/1yDkJfJOLeVlON7ZdRSnR34Ra_ikTVI0A/preview" target='_blank'>[Demo Video]</a> • -->
   <!-- <a href="https://colab.research.google.com/github/nirvanalan/E3DGE/blob/main/notebook/CVPR23_E3DGE_Demo.ipynb" target='_blank'>[Colab Demo]</a>  -->
-</h4>
-</div>
+<!-- </h4>
+</div> -->
 
 <!-- ## :mega: Updates
 
