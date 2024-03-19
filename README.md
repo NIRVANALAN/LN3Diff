@@ -105,3 +105,24 @@ Self-supervised Geometry-Aware Encoder for Style-based 3d GAN Inversion. -->
 
 [03/2023] E3DGE is accepted to CVPR 2023 :partying_face:! 
  -->
+
+## :handshake: Citation
+If you find our work useful for your research, please consider citing the paper:
+```
+@misc{lan2024ln3diff,
+title={LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation}, 
+author={Yushi Lan and Fangzhou Hong and Shuai Yang and Shangchen Zhou and Xuyi Meng and Bo Dai and Xingang Pan and Chen Change Loy},
+year={2024},
+eprint={2403.12019},
+archivePrefix={arXiv},
+primaryClass={cs.CV}
+}
+```
+
+## :newspaper_roll:  License
+
+Distributed under the S-Lab License. See `LICENSE` for more information.
+
+## Contact
+
+If you have any question, please feel free to contact us via `lanyushi15@gmail.com`.
