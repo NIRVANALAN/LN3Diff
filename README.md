@@ -97,7 +97,8 @@ Self-supervised Geometry-Aware Encoder for Style-based 3d GAN Inversion. -->
   <!-- <a href="https://drive.google.com/file/d/1yDkJfJOLeVlON7ZdRSnR34Ra_ikTVI0A/preview" target='_blank'>[Demo Video]</a> • -->
   <!-- <a href="https://colab.research.google.com/github/nirvanalan/E3DGE/blob/main/notebook/CVPR23_E3DGE_Demo.ipynb" target='_blank'>[Colab Demo]</a>  -->
 <!-- </h4>
-</div> -->
+
+</div>
 
 <!-- ## :mega: Updates
 
@@ -105,6 +106,8 @@ Self-supervised Geometry-Aware Encoder for Style-based 3d GAN Inversion. -->
 
 [03/2023] E3DGE is accepted to CVPR 2023 :partying_face:! 
  -->
+
+</div>
 
 ## :handshake: Citation
 If you find our work useful for your research, please consider citing the paper:
