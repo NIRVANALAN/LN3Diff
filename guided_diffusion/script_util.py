@@ -11,6 +11,7 @@ from .respace import SpacedDiffusion, space_timesteps
 from .unet import SuperResModel, UNetModel, EncoderUNetModel # , UNetModelWithHint
 import torch as th
 from dit.dit_models_xformers import DiT_models
+from dit.dit_models_xformers import TextCondDiTBlock
 if th.cuda.is_available():
     from xformers.triton import FusedLayerNorm as LayerNorm
 
@@ -377,7 +378,8 @@ def create_model(
             learn_sigma=learn_sigma,
             in_channels=denoise_in_channels,
             context_dim=context_dim,  # add CLIP text embedding
-            roll_out=roll_out)
+            roll_out=roll_out, 
+            vit_blk=TextCondDiTBlock)
     else:
 
         # if create_unet_with_hint:

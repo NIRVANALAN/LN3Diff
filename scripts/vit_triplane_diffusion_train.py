@@ -279,26 +279,14 @@ def training_loop(args):
 
     TrainLoop = {
         'adm': nsr.TrainLoop3DDiffusion,
-        'dit': nsr.TrainLoop3DDiffusionDiT,
-        'ssd': nsr.TrainLoop3DDiffusionSingleStage,
         # 'ssd_cvD': nsr.TrainLoop3DDiffusionSingleStagecvD,
-        'ssd_cvD_sds': nsr.TrainLoop3DDiffusionSingleStagecvDSDS,
-        'ssd_cvd_sds_no_separate_sds_step':
-        nsr.TrainLoop3DDiffusionSingleStagecvDSDS_sdswithrec,
-        'vpsde_lsgm_noD': nsr.lsgm.TrainLoop3DDiffusionLSGM_noD,  # use vpsde
-        'vpsde_TrainLoop3DDiffusionLSGM_cvD': nsr.lsgm.TrainLoop3DDiffusionLSGM_cvD,
-        'vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling': nsr.lsgm.TrainLoop3DDiffusionLSGM_cvD_scaling,
-        'vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm': nsr.lsgm.TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm,
-        'vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD': nsr.lsgm.TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD,
-        'vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_weightingv0': nsr.lsgm.TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_weightingv0,
-        'vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_iterativeED': nsr.lsgm.TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_iterativeED,
-        'vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_iterativeED_nv': nsr.lsgm.TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_iterativeED_nv,
         'vpsde_lsgm_joint_noD': nsr.lsgm.TrainLoop3DDiffusionLSGMJointnoD,  # use vpsde
-        'vpsde_lsgm_joint_noD_ponly': nsr.lsgm.TrainLoop3DDiffusionLSGMJointnoD_ponly,  # use vpsde
         # control
-        'vpsde_cldm':nsr.lsgm.TrainLoop3DDiffusionLSGM_Control,
+        # 'vpsde_cldm':nsr.lsgm.TrainLoop3DDiffusionLSGM_Control,
         'vpsde_crossattn': nsr.lsgm.TrainLoop3DDiffusionLSGM_crossattn,
-        'vpsde_ldm': nsr.lsgm.TrainLoop3D_LDM,
+        # 'vpsde_ldm': nsr.lsgm.TrainLoop3D_LDM,
+        'sgm_legacy':
+        nsr.lsgm.sgm_DiffusionEngine.DiffusionEngineLSGM,
     }[args.trainer_name]
 
     if 'vpsde' in args.trainer_name:

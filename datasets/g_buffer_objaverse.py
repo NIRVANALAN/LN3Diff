@@ -2782,6 +2782,147 @@ def load_wds_data(
         # yield from wds_loader
 
 
+class PostProcess_forlatent:
+    def __init__(
+        self,
+        reso,
+        reso_encoder,
+        imgnet_normalize,
+        plucker_embedding,
+        decode_encode_img_only,
+    ) -> None:
+        self.plucker_embedding = plucker_embedding
+        self.decode_encode_img_only = decode_encode_img_only
+
+        transformations = [
+            transforms.ToTensor(),  # [0,1] range
+        ]
+        if imgnet_normalize:
+            transformations.append(
+                transforms.Normalize((0.485, 0.456, 0.406),
+                                        (0.229, 0.224, 0.225))  # type: ignore
+            )
+        else:
+            transformations.append(
+                transforms.Normalize((0.5, 0.5, 0.5),
+                                        (0.5, 0.5, 0.5)))  # type: ignore
+
+        self.normalize = transforms.Compose(transformations)
+
+        self.reso_encoder = reso_encoder
+        self.reso = reso
+        self.instance_data_length = 40
+        # self.pair_per_instance = 1 # compat
+        self.pair_per_instance = 2  # check whether improves IO
+        # self.pair_per_instance = 3 # check whether improves IO
+        # self.pair_per_instance = 4 # check whether improves IO
+
+    def _post_process_sample(self, data_sample):
+        # raw_img, depth, c, bbox, caption, ins = data_sample
+        raw_img, c, caption, ins = data_sample
+
+        # bbox = (bbox*(self.reso/256)).astype(np.uint8) # normalize bbox to the reso range
+
+        if raw_img.shape[-2] != self.reso_encoder:
+            img_to_encoder = cv2.resize(
+                raw_img, (self.reso_encoder, self.reso_encoder),
+                interpolation=cv2.INTER_LANCZOS4)
+        else:
+            img_to_encoder = raw_img
+
+        img_to_encoder = self.normalize(img_to_encoder)
+        if self.plucker_embedding:
+            rays_o, rays_d = self.gen_rays(c)
+            rays_plucker = torch.cat(
+                [torch.cross(rays_o, rays_d, dim=-1), rays_d],
+                dim=-1).permute(2, 0, 1)  # [h, w, 6] -> 6,h,w
+            img_to_encoder = torch.cat([img_to_encoder, rays_plucker], 0)
+
+        img = cv2.resize(raw_img, (self.reso, self.reso),
+                            interpolation=cv2.INTER_LANCZOS4)
+
+        img = torch.from_numpy(img).permute(2, 0, 1) / 127.5 - 1
+
+        return (img_to_encoder, img, c, caption, ins)
+
+    def rand_sample_idx(self):
+        return random.randint(0, self.instance_data_length - 1)
+
+    def rand_pair(self):
+        return (self.rand_sample_idx() for _ in range(2))
+
+    def paired_post_process(self, sample):
+        # repeat n times?
+        all_inp_list = []
+        all_nv_list = []
+        caption, ins = sample[-2:]
+        # expanded_return = []
+        for _ in range(self.pair_per_instance):
+            cano_idx, nv_idx = self.rand_pair()
+            cano_sample = self._post_process_sample(
+                item[cano_idx] for item in sample[:-2])
+            nv_sample = self._post_process_sample(item[nv_idx]
+                                                    for item in sample[:-2])
+            all_inp_list.extend(cano_sample)
+            all_nv_list.extend(nv_sample)
+        return (*all_inp_list, *all_nv_list, caption, ins)
+        # return [cano_sample, nv_sample, caption, ins]
+        # return (*cano_sample, *nv_sample, caption, ins)
+
+    # def single_sample_create_dict(self, sample, prefix=''):
+    #     # if len(sample) == 1:
+    #     #     sample = sample[0]
+    #     # assert len(sample) == 6
+    #     img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox = sample
+    #     return {
+    #         # **sample,
+    #         f'{prefix}img_to_encoder': img_to_encoder,
+    #         f'{prefix}img': img,
+    #         f'{prefix}depth_mask': fg_mask_reso,
+    #         f'{prefix}depth': depth_reso,
+    #         f'{prefix}c': c,
+    #         f'{prefix}bbox': bbox,
+    #     }
+
+    def single_sample_create_dict(self, sample, prefix=''):
+        # if len(sample) == 1:
+        #     sample = sample[0]
+        # assert len(sample) == 6
+        # img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox = sample
+        img_to_encoder, img, c, caption, ins = sample
+        return {
+            # **sample,
+            'img_to_encoder': img_to_encoder,
+            'img': img,
+            'c': c,
+            'caption': caption,
+            'ins': ins
+        }
+
+    def decode_zip(self, sample_pyd, shape=(256, 256)):
+        if isinstance(sample_pyd, tuple):
+            sample_pyd = sample_pyd[0]
+        assert isinstance(sample_pyd, dict)
+
+        latent = sample_pyd['latent']
+        caption = sample_pyd['caption'].decode('utf-8')
+        c = sample_pyd['c']
+        # img = sample_pyd['img']
+        # st()
+
+        return latent, caption, c
+
+    def create_dict(self, sample):
+
+        return {
+            # **sample,
+            'latent': sample[0],
+            'caption': sample[1],
+            'c': sample[2],
+        }
+
+
+
 # test tar loading
 def load_wds_latent_ResampledShard(file_path,
                                    batch_size,
@@ -2795,148 +2936,7 @@ def load_wds_latent_ResampledShard(file_path,
                                    decode_encode_img_only=False,
                                    **kwargs):
 
-    #     return raw_img, depth, c, bbox, sample_pyd['ins.pyd'], sample_pyd['fname.pyd']
-    class PostProcess:
-
-        def __init__(
-            self,
-            reso,
-            reso_encoder,
-            imgnet_normalize,
-            plucker_embedding,
-            decode_encode_img_only,
-        ) -> None:
-            self.plucker_embedding = plucker_embedding
-            self.decode_encode_img_only = decode_encode_img_only
-
-            transformations = [
-                transforms.ToTensor(),  # [0,1] range
-            ]
-            if imgnet_normalize:
-                transformations.append(
-                    transforms.Normalize((0.485, 0.456, 0.406),
-                                         (0.229, 0.224, 0.225))  # type: ignore
-                )
-            else:
-                transformations.append(
-                    transforms.Normalize((0.5, 0.5, 0.5),
-                                         (0.5, 0.5, 0.5)))  # type: ignore
-
-            self.normalize = transforms.Compose(transformations)
-
-            self.reso_encoder = reso_encoder
-            self.reso = reso
-            self.instance_data_length = 40
-            # self.pair_per_instance = 1 # compat
-            self.pair_per_instance = 2  # check whether improves IO
-            # self.pair_per_instance = 3 # check whether improves IO
-            # self.pair_per_instance = 4 # check whether improves IO
-
-        def _post_process_sample(self, data_sample):
-            # raw_img, depth, c, bbox, caption, ins = data_sample
-            raw_img, c, caption, ins = data_sample
-
-            # bbox = (bbox*(self.reso/256)).astype(np.uint8) # normalize bbox to the reso range
-
-            if raw_img.shape[-2] != self.reso_encoder:
-                img_to_encoder = cv2.resize(
-                    raw_img, (self.reso_encoder, self.reso_encoder),
-                    interpolation=cv2.INTER_LANCZOS4)
-            else:
-                img_to_encoder = raw_img
-
-            img_to_encoder = self.normalize(img_to_encoder)
-            if self.plucker_embedding:
-                rays_o, rays_d = self.gen_rays(c)
-                rays_plucker = torch.cat(
-                    [torch.cross(rays_o, rays_d, dim=-1), rays_d],
-                    dim=-1).permute(2, 0, 1)  # [h, w, 6] -> 6,h,w
-                img_to_encoder = torch.cat([img_to_encoder, rays_plucker], 0)
-
-            img = cv2.resize(raw_img, (self.reso, self.reso),
-                             interpolation=cv2.INTER_LANCZOS4)
-
-            img = torch.from_numpy(img).permute(2, 0, 1) / 127.5 - 1
-
-            return (img_to_encoder, img, c, caption, ins)
-
-        def rand_sample_idx(self):
-            return random.randint(0, self.instance_data_length - 1)
-
-        def rand_pair(self):
-            return (self.rand_sample_idx() for _ in range(2))
-
-        def paired_post_process(self, sample):
-            # repeat n times?
-            all_inp_list = []
-            all_nv_list = []
-            caption, ins = sample[-2:]
-            # expanded_return = []
-            for _ in range(self.pair_per_instance):
-                cano_idx, nv_idx = self.rand_pair()
-                cano_sample = self._post_process_sample(
-                    item[cano_idx] for item in sample[:-2])
-                nv_sample = self._post_process_sample(item[nv_idx]
-                                                      for item in sample[:-2])
-                all_inp_list.extend(cano_sample)
-                all_nv_list.extend(nv_sample)
-            return (*all_inp_list, *all_nv_list, caption, ins)
-            # return [cano_sample, nv_sample, caption, ins]
-            # return (*cano_sample, *nv_sample, caption, ins)
-
-        # def single_sample_create_dict(self, sample, prefix=''):
-        #     # if len(sample) == 1:
-        #     #     sample = sample[0]
-        #     # assert len(sample) == 6
-        #     img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox = sample
-        #     return {
-        #         # **sample,
-        #         f'{prefix}img_to_encoder': img_to_encoder,
-        #         f'{prefix}img': img,
-        #         f'{prefix}depth_mask': fg_mask_reso,
-        #         f'{prefix}depth': depth_reso,
-        #         f'{prefix}c': c,
-        #         f'{prefix}bbox': bbox,
-        #     }
-
-        def single_sample_create_dict(self, sample, prefix=''):
-            # if len(sample) == 1:
-            #     sample = sample[0]
-            # assert len(sample) == 6
-            # img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox = sample
-            img_to_encoder, img, c, caption, ins = sample
-            return {
-                # **sample,
-                'img_to_encoder': img_to_encoder,
-                'img': img,
-                'c': c,
-                'caption': caption,
-                'ins': ins
-            }
-
-        def decode_zip(self, sample_pyd, shape=(256, 256)):
-            if isinstance(sample_pyd, tuple):
-                sample_pyd = sample_pyd[0]
-            assert isinstance(sample_pyd, dict)
-
-            latent = sample_pyd['latent']
-            caption = sample_pyd['caption'].decode('utf-8')
-            c = sample_pyd['c']
-            # img = sample_pyd['img']
-            # st()
-
-            return latent, caption, c
-
-        def create_dict(self, sample):
-
-            return {
-                # **sample,
-                'latent': sample[0],
-                'caption': sample[1],
-                'c': sample[2],
-            }
-
-    post_process_cls = PostProcess(
+    post_process_cls = PostProcess_forlatent(
         reso,
         reso_encoder,
         imgnet_normalize=imgnet_normalize,

@@ -21,6 +21,7 @@ from einops import rearrange
 from pdb import set_trace as st
 
 # support flash attention and xformer acceleration
+from ldm.modules.attention import CrossAttention
 from vit.vision_transformer import MemEffAttention as Attention
 
 # from torch.nn import LayerNorm
@@ -31,6 +32,8 @@ if torch.cuda.is_available():
     from xformers.triton import FusedLayerNorm as LayerNorm
     from xformers.components.activations import build_activation, Activation
     from xformers.components.feedforward import fused_mlp
+
+from ldm.modules.attention import MemoryEfficientCrossAttention
 
 
 def modulate(x, shift, scale):
@@ -134,6 +137,53 @@ class ClipProjector(nn.Module):
         return clip_text_x @ self.text_projection
 
 
+def approx_gelu():
+    return nn.GELU(approximate="tanh")
+
+
+class CaptionEmbedder(nn.Module):
+    """
+    copied from https://github.com/hpcaitech/Open-Sora
+
+    Embeds class labels into vector representations. Also handles label dropout for classifier-free guidance.
+    """
+
+    def __init__(self,
+                 in_channels,
+                 hidden_size,
+                 act_layer=nn.GELU(approximate="tanh"),
+                 token_num=120):
+        super().__init__()
+
+        self.y_proj = Mlp(in_features=in_channels,
+                          hidden_features=hidden_size,
+                          out_features=hidden_size,
+                          act_layer=act_layer,
+                          drop=0)
+        # self.register_buffer("y_embedding", nn.Parameter(torch.randn(token_num, in_channels) / in_channels**0.5))
+        # self.uncond_prob = uncond_prob
+
+    # def token_drop(self, caption, force_drop_ids=None):
+    #     """
+    #     Drops labels to enable classifier-free guidance.
+    #     """
+    #     if force_drop_ids is None:
+    #         drop_ids = torch.rand(caption.shape[0]).cuda() < self.uncond_prob
+    #     else:
+    #         drop_ids = force_drop_ids == 1
+    #     caption = torch.where(drop_ids[:, None, None, None], self.y_embedding, caption)
+    #     return caption
+
+    def forward(self, caption, **kwargs):
+        # if train:
+        #     assert caption.shape[2:] == self.y_embedding.shape
+        # use_dropout = self.uncond_prob > 0
+        # if (train and use_dropout) or (force_drop_ids is not None):
+        #     caption = self.token_drop(caption, force_drop_ids)
+        caption = self.y_proj(caption)
+        return caption
+
+
 #################################################################################
 #                                 Core DiT Model                                #
 #################################################################################
@@ -146,7 +196,7 @@ class DiTBlock(nn.Module):
 
     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
         super().__init__()
-        nn.LayerNorm
+        # nn.LayerNorm
         self.norm1 = LayerNorm(
             hidden_size,
             affine=False,
@@ -186,6 +236,34 @@ class DiTBlock(nn.Module):
             modulate(self.norm1(x), shift_msa, scale_msa))
         x = x + gate_mlp.unsqueeze(1) * self.mlp(
             modulate(self.norm2(x), shift_mlp, scale_mlp))
+        return x
+
+
+class TextCondDiTBlock(DiTBlock):
+    # https://github.com/hpcaitech/Open-Sora/blob/68b8f60ff0ff4b3a3b63fe1d8cb17d66b7845ef7/opensora/models/stdit/stdit.py#L69
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4, **block_kwargs):
+        super().__init__(hidden_size, num_heads, mlp_ratio, **block_kwargs)
+        self.cross_attn = MemoryEfficientCrossAttention(query_dim=hidden_size,
+                                                        heads=num_heads)
+        # self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size**0.5)
+
+    def forward(self, x, t, context):
+        # B, N, C = x.shape
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        #    self.scale_shift_table[None] + t.reshape(B,6,-1)).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+            t).chunk(6, dim=1)
+
+        x = x + gate_msa.unsqueeze(1) * self.attn(
+            modulate(self.norm1(x), shift_msa, scale_msa))
+
+        # add text embedder via cross attention
+        x = x + self.cross_attn(x, context)
+
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(
+            modulate(self.norm2(x), shift_mlp, scale_mlp))
+
         return x
 
 
@@ -255,9 +333,13 @@ class DiT(nn.Module):
         context_dim=False,
         roll_out=False,
         vit_blk=DiTBlock,
+        # vit_blk=TextCondDiTBlock,
         final_layer_blk=FinalLayer,
     ):
         super().__init__()
+        self.plane_n = 3
+
+        self.depth = depth
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
@@ -278,9 +360,10 @@ class DiT(nn.Module):
             self.y_embedder = None
 
         if context_dim is not None:
-            self.clip_text_proj = ClipProjector(context_dim,
-                                                hidden_size,
-                                                tx_width=depth)
+            self.clip_text_proj = CaptionEmbedder(context_dim,
+                                                  hidden_size,
+                                                  act_layer=approx_gelu)
+
         else:
             self.clip_text_proj = None
 
@@ -307,15 +390,15 @@ class DiT(nn.Module):
                                            self.out_channels)
         self.initialize_weights()
 
-        self.mixed_prediction = mixed_prediction  # This enables mixed prediction
-        if self.mixed_prediction:
-            if self.roll_out:
-                logit_ch = in_channels * 3
-            else:
-                logit_ch = in_channels
-            init = mixing_logit_init * torch.ones(
-                size=[1, logit_ch, 1, 1])  # hard coded for now
-            self.mixing_logit = torch.nn.Parameter(init, requires_grad=True)
+        # self.mixed_prediction = mixed_prediction  # This enables mixed prediction
+        # if self.mixed_prediction:
+        #     if self.roll_out:
+        #         logit_ch = in_channels * 3
+        #     else:
+        #         logit_ch = in_channels
+        #     init = mixing_logit_init * torch.ones(
+        #         size=[1, logit_ch, 1, 1])  # hard coded for now
+        #     self.mixing_logit = torch.nn.Parameter(init, requires_grad=True)
 
     # def len(self):
     #     return len(self.blocks)
@@ -399,7 +482,7 @@ class DiT(nn.Module):
         t = self.t_embedder(timesteps)  # (N, D)
 
         if self.roll_out:  # !
-            x = rearrange(x, 'b (n c) h w->(b n) c h w', n=3)
+            x = rearrange(x, 'b (c n) h w->(b n) c h w', n=3)
 
         x = self.x_embedder(
             x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
@@ -407,26 +490,21 @@ class DiT(nn.Module):
         if self.roll_out:  # ! roll-out in the L dim, not B dim. add condition to all tokens.
             x = rearrange(x, '(b n) l c ->b (n l) c', n=3)
 
-        if self.y_embedder is not None:
-            assert y is not None
-            y = self.y_embedder(y, self.training)  # (N, D)
-            c = t + y  # (N, D)
-        elif context is not None:
-            assert context.ndim == 2
-            context = self.clip_text_proj(context)
+        # if self.y_embedder is not None:
+        #     assert y is not None
+        #     y = self.y_embedder(y, self.training)  # (N, D)
+        #     c = t + y  # (N, D)
 
-            if context.shape[0] < t.shape[
-                    0]:  # same caption context for different view input of the same ID
-                context = torch.repeat_interleave(context,
-                                                  t.shape[0] //
-                                                  context.shape[0],
-                                                  dim=0)
+        assert context is not None
 
-            # if context.ndim == 3: # compat version from SD
-            #     context = context[:, 0, :]
-            c = t + context
-        else:
-            c = t  # BS 1024
+        # assert context.ndim == 2
+        if isinstance(context, dict):
+            context = context['crossattn']  # sgm conditioner compat
+        context = self.clip_text_proj(context)
+
+        # c = t + context
+        # else:
+        # c = t  # BS 1024
 
         for blk_idx, block in enumerate(self.blocks):
             # if self.roll_out:
@@ -438,9 +516,11 @@ class DiT(nn.Module):
             #         x = rearrange(x, 'b l (n c) -> b (n l) c ', n=3)
             #         x = block(x, c)  # (N, T, D)
             # else:
-            x = block(x, c)  # (N, T, D)
+            # st()
+            x = block(x, t, context)  # (N, T, D)
 
-        x = self.final_layer(x, c)  # (N, T, patch_size ** 2 * out_channels)
+        # todo later
+        x = self.final_layer(x, t)  # (N, T, patch_size ** 2 * out_channels)
 
         if self.roll_out:  # move n from L to B axis
             x = rearrange(x, 'b (n l) c ->(b n) l c', n=3)
@@ -448,8 +528,11 @@ class DiT(nn.Module):
         x = self.unpatchify(x)  # (N, out_channels, H, W)
 
         if self.roll_out:  # move n from L to B axis
-            x = rearrange(x, '(b n) c h w -> b (n c) h w', n=3)
+            x = rearrange(x, '(b n) c h w -> b (c n) h w', n=3)
             # x = rearrange(x, 'b n) c h w -> b (n c) h w', n=3)
+
+        # cast to float32 for better accuracy
+        x = x.to(torch.float32)
 
         return x
 
