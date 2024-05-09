@@ -186,6 +186,7 @@ bash shell_scripts/final_release/inference/sample_obajverse.sh
 
 which shall give the following result:
 
+https://github.com/NIRVANALAN/LN3Diff/assets/23359323/03ac96a1-bc23-4b24-8ca0-1325f8556c7f
 
 The marching-cube extracted mesh can be visualized with Blender/MeshLab:
 
