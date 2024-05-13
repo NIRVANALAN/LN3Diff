@@ -1677,8 +1677,7 @@ class RodinSR_256_fusionv6_ConvQuant_liteSR_dinoInit3DAttn_SD_B_3L_C_withrollout
                     indexing='ij',
                 ),
                             dim=-1).reshape(-1, 3))
-        cube_grid = torch.stack(grid_points, dim=0).to(planes.device)  # 1 N 3
-        # st()
+        cube_grid = torch.stack(grid_points, dim=0).to(planes.device)  # 1 N 3 
 
         features = self.forward_points(planes, cube_grid)
 

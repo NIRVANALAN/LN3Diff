@@ -600,13 +600,11 @@ class TrainLoop3DRec(TrainLoopBasic):
 
         # if export_mesh:
         # if True:
-        if save_mesh:
+        if save_mesh: # ! tune marching cube grid size according to the vram size
             # mesh_size = 512
-            mesh_size = 256
-            # mesh_size = 384
-            # mesh_size = 320
-            # mesh_thres = 3 # TODO, requires tuning
-            # mesh_thres = 5 # TODO, requires tuning
+            # mesh_size = 256
+            mesh_size = 192
+
             mesh_thres = 10  # TODO, requires tuning
             import mcubes
             import trimesh
@@ -623,17 +621,20 @@ class TrainLoop3DRec(TrainLoopBasic):
             vtx, faces = mcubes.marching_cubes(
                 grid_out['sigma'].squeeze(0).squeeze(-1).cpu().numpy(),
                 mesh_thres)
-            vtx = vtx / (mesh_size - 1) * 2 - 1
+            grid_scale = [rec_model.module.decoder.rendering_kwargs['sampler_bbox_min'], rec_model.module.decoder.rendering_kwargs['sampler_bbox_max']]
+            vtx = (vtx / (mesh_size-1) * 2 - 1 ) * grid_scale[1] # normalize to g-buffer objav dataset scale
 
-            # vtx_tensor = th.tensor(vtx, dtype=th.float32, device=dist_util.dev()).unsqueeze(0)
-            # vtx_colors = self.model.synthesizer.forward_points(planes, vtx_tensor)['rgb'].squeeze(0).cpu().numpy()  # (0, 1)
-            # vtx_colors = (vtx_colors * 255).astype(np.uint8)
+            # ! save normalized color to the vertex
+            vtx_tensor = th.tensor(vtx, dtype=th.float32, device=dist_util.dev()).unsqueeze(0)
+            vtx_colors = rec_model.module.decoder.forward_points(ddpm_latent['latent_after_vit'], vtx_tensor)['rgb'].squeeze(0).cpu().numpy()  # (0, 1)
+            vtx_colors = (vtx_colors.clip(0,1) * 255).astype(np.uint8)
 
-            # mesh = trimesh.Trimesh(vertices=vtx, faces=faces, vertex_colors=vtx_colors)
-            mesh = trimesh.Trimesh(
-                vertices=vtx,
-                faces=faces,
-            )
+            mesh = trimesh.Trimesh(vertices=vtx, faces=faces, vertex_colors=vtx_colors)
+
+            # mesh = trimesh.Trimesh(
+            #     vertices=vtx,
+            #     faces=faces,
+            # )
 
             mesh_dump_path = os.path.join(dump_path, f'{name_prefix}.ply')
             mesh.export(mesh_dump_path, 'ply')

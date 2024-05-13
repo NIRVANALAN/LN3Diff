@@ -24,7 +24,7 @@ microbatch=4 #
 
 
 # use g-buffer Objaverse data path here. check readme for more details.
-data_dir=./assets/Objaverse/
+data_dir='./assets/stage1_vae_reconstruction/Objaverse'
 
 
 DATASET_FLAGS="
