@@ -176,6 +176,14 @@ Put the downloaded checkpoints under ```checkpoints``` folder for inference. The
 
 <strong>Note that to extract the mesh, 24GiB VRAM is required.</strong>
 
+### Training
+
+Preparation:
+
+The Cap3D captions can be downloaded from [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/EdzVtlT_eUpItE73osqE1UEBSNmC2wfQ0YimmMcLcRhpqw?e=wMHtvx). 
+Please put under ```'./datasets/text_captions_cap3d.json'```
+
+
 #### Stage-1 VAE 3D reconstruction
 
 For (Objaverse) stage-1 VAE 3D reconstruction and extract VAE latents for diffusion learning, please run

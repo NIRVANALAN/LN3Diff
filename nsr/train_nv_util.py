@@ -1295,7 +1295,10 @@ class TrainLoop3DRecNVPatchSingleForwardMV(TrainLoop3DRecNVPatchSingleForward):
         batch_size = batch['img_to_encoder'].shape[0]
 
         batch.pop('caption')  # not required
+        batch.pop('nv_caption')  # not required
         batch.pop('ins')  # not required
+        batch.pop('nv_ins')  # not required
+
         if '__key__' in batch.keys():
             batch.pop('__key__')
 
@@ -1326,7 +1329,6 @@ class TrainLoop3DRecNVPatchSingleForwardMV(TrainLoop3DRecNVPatchSingleForward):
             cropped_target = {
                 k:
                 th.empty_like(v).repeat_interleave(2, 0)
-                # th.empty_like(v).repeat_interleave(1, 0)
                 [..., :patch_rendering_resolution, :patch_rendering_resolution]
                 if k not in [
                     'ins_idx', 'img_to_encoder', 'img_sr', 'nv_img_to_encoder',
@@ -1353,17 +1355,6 @@ class TrainLoop3DRecNVPatchSingleForwardMV(TrainLoop3DRecNVPatchSingleForward):
                                 micro[f'{key}'][j - self.microbatch:j -
                                                 self.microbatch + 1], top,
                                 left, height, width)
-
-            # for j in range(batch_size, 2*batch_size, 1):
-            #     top, left, height, width = target['ray_bboxes'][
-            #         j]  # list of tuple
-            #     # for key in ('img', 'depth_mask', 'depth', 'depth_mask_sr'): # type: ignore
-            #     for key in ('img', 'depth_mask', 'depth'):  # type: ignore
-
-            #         cropped_target[f'{key}'][  # ! no nv_ here
-            #             j:j + 1] = torchvision.transforms.functional.crop(
-            #                 micro[f'{key}'][j-batch_size:j-batch_size + 1], top, left, height,
-            #                 width)
 
             # ! vit no amp
             latent = self.rec_model(img=micro['img_to_encoder'],

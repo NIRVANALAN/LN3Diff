@@ -10,8 +10,8 @@ l1_lambda=0. # following gaussian splatting
 l2_lambda=1 # ! use_conf_map
 # patchgan_disc=0.002
 
-patchgan_disc_factor=0.1
-patchgan_disc_g_weight=0.02
+patchgan_disc_factor=1.0
+patchgan_disc_g_weight=0.5
 
 # NUM_GPUS=4
 # NUM_GPUS=8

@@ -1833,6 +1833,8 @@ class RodinSR_256_fusionv6_ConvQuant_liteSR_dinoInit3DAttn_SD_B_3L_C_withrollout
 
         return ret_dict
 
+    def vit_decode(self, latent, img_size, sample_posterior=True, **kwargs):
+        return super().vit_decode(latent, img_size, sample_posterior)
 
 # objv class
 

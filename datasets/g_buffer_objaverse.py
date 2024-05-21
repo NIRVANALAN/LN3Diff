@@ -668,7 +668,6 @@ class MultiViewObjverseDataset(Dataset):
                                      'campos_512_v4'))
             return ins_list
 
-        # st()
         if shuffle_across_cls:
             self.ins_list = []
             # for subset in ['Animals', 'Transportations_tar', 'Furnitures']:
@@ -710,8 +709,8 @@ class MultiViewObjverseDataset(Dataset):
         self.instance_data_length = -1
 
         with open(
-                # '/cpfs01/shared/V2V/V2V_hdd/yslan/aigc3d/text_captions_cap3d.json'
-                '/mnt/yslan/objaverse/richdreamer/dataset/text_captions_cap3d.json',
+                # '/mnt/yslan/objaverse/richdreamer/dataset/text_captions_cap3d.json',
+                './datasets/text_captions_cap3d.json',
         ) as f:
             self.caption_data = json.load(f)
 
@@ -751,6 +750,8 @@ class MultiViewObjverseDataset(Dataset):
                 # cur_all_fname = [f'{idx:05d}' for idx in [6,12,18,24]
                 # cur_all_fname = [f'{idx:05d}' for idx in [7,16,24,25]
                 cur_all_fname = [f'{idx:05d}' for idx in [4,12,20,25]
+                # cur_all_fname = [f'{idx:05d}' for idx in [4,4,4,4]
+                # cur_all_fname = [f'{idx:05d}' for idx in [16,16,16,4]
                                  ]  # ! four views for inference
                 # cur_all_fname += [f'{idx:05d}' for idx in range(40) if idx not in [0,12,30,36]] # ! four views for inference
             elif self.single_view_for_i23d:
@@ -775,16 +776,10 @@ class MultiViewObjverseDataset(Dataset):
                     try:  # data missing?
                         assert len(cur_all_fname) == self.instance_data_length
                     except:
-                        # with open('error_log.txt', 'a') as f:
-                        #     f.write(str(e) + '\n')
-                        with open('missing_ins_new2.txt', 'a') as f:
+                        with open('missing_ins.txt', 'a') as f:
                             f.write(str(Path(ins.parent)) +
                                     '\n')  # remove the "campos_512_v4"
                         continue
-
-            # if test: # use middle image as the novel view model input
-            #     mid_index = len(cur_all_fname) // 3 * 2
-            #     cur_all_fname.insert(0, cur_all_fname[mid_index])
 
             self.pose_list += ([
                 os.path.join(ins, fname, fname + '.json')
