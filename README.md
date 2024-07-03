@@ -98,6 +98,8 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :mega: Updates
 
+[06/2024] LN3Diff got accepted to ECCV 2024 :partying_face:! 
+
 [03/2024] Initial release.
 
 [04/2024] Inference and training codes on Objaverse, ShapeNet and FFHQ are released, including pre-trained model and training dataset.
@@ -105,28 +107,27 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :dromedary_camel: TODO
 
+- [ ] Release DiT-based 3D generation framework.
+- [ ] Polish the dataset preparation and training doc.
+- [ ] add metrics evaluation scripts and samples.
+- [ ] Lint the code.
+- [ ] Add Gradio demo.
+- [ ] Release the new T23D Objaverse model trained with 80K+ instances dataset.
 - [x] Release the inference and training code.
 - [x] Release the pre-trained checkpoints of ShapeNet and FFHQ.
 - [x] Release the pre-trained checkpoints of T23D Objaverse model trained with 30K+ instances dataset.
 - [x] Release the stage-1 VAE of Objaverse trained with 80K+ instances dataset.
-- [ ] Add Gradio demo.
-- [ ] Polish the dataset preparation and training doc.
-- [ ] add metrics evaluation scripts and samples.
-- [ ] Lint the code.
-- [ ] Release the new T23D Objaverse model trained with 80K+ instances dataset.
 
 
 
 ## :handshake: Citation
 If you find our work useful for your research, please consider citing the paper:
 ```
-@misc{lan2024ln3diff,
-title={LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation}, 
-author={Yushi Lan and Fangzhou Hong and Shuai Yang and Shangchen Zhou and Xuyi Meng and Bo Dai and Xingang Pan and Chen Change Loy},
-year={2024},
-eprint={2403.12019},
-archivePrefix={arXiv},
-primaryClass={cs.CV}
+@inproceedings{lan2024ln3diff,
+    title={LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation}, 
+    author={Yushi Lan and Fangzhou Hong and Shuai Yang and Shangchen Zhou and Xuyi Meng and Bo Dai and Xingang Pan and Chen Change Loy},
+    year={2024},
+    booktitle={ECCV},
 }
 ```
 
