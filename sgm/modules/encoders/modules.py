@@ -2,6 +2,7 @@ import math
 from contextlib import nullcontext
 from functools import partial
 from typing import Dict, List, Optional, Tuple, Union
+from pdb import set_trace as st
 
 import kornia
 import numpy as np
@@ -23,6 +24,8 @@ from ...modules.distributions.distributions import DiagonalGaussianDistribution
 from ...util import (append_dims, autocast, count_params, default,
                      disabled_train, expand_dims_like, instantiate_from_config)
 
+
+from dit.dit_models_xformers import CaptionEmbedder, approx_gelu, t2i_modulate
 
 class AbstractEmbModel(nn.Module):
     def __init__(self):
@@ -574,8 +577,11 @@ class FrozenOpenCLIPImageEmbedder(AbstractEmbModel):
 
     def __init__(
         self,
-        arch="ViT-H-14",
-        version="laion2b_s32b_b79k",
+        # arch="ViT-H-14",
+        # version="laion2b_s32b_b79k",
+        arch="ViT-L-14",
+        # version="laion2b_s32b_b82k",
+        version="openai",
         device="cuda",
         max_length=77,
         freeze=True,
@@ -726,6 +732,275 @@ class FrozenOpenCLIPImageEmbedder(AbstractEmbModel):
 
     def encode(self, text):
         return self(text)
+
+
+# dino-v2 embedder
+class FrozenDinov2ImageEmbedder(AbstractEmbModel):
+    """
+    Uses the Dino-v2 for low-level image embedding
+    """
+
+    def __init__(
+        self,
+        arch="vitl",
+        version="dinov2", # by default
+        device="cuda",
+        max_length=77,
+        freeze=True,
+        antialias=True,
+        ucg_rate=0.0,
+        unsqueeze_dim=False,
+        repeat_to_max_len=False,
+        num_image_crops=0,
+        output_tokens=False,
+        output_cls=False,
+        init_device=None,
+    ):
+        super().__init__()
+
+        self.model = torch.hub.load(
+            f'facebookresearch/{version}',
+            '{}_{}{}_reg'.format(
+                version, f'{arch}', '14'
+            ),  # with registers better performance. vitl and vitg similar. Since fixed, load the best one.
+            pretrained=True).to(torch.device(default(init_device, "cpu")))
+
+        # ! frozen
+        # self.tokenizer.requires_grad_(False)
+        # self.tokenizer.eval()
+
+        # assert freeze # add adaLN here
+        if freeze:
+            self.freeze()
+
+        # self.model = model
+        self.max_crops = num_image_crops
+        self.pad_to_max_len = self.max_crops > 0
+        self.repeat_to_max_len = repeat_to_max_len and (not self.pad_to_max_len)
+        self.device = device
+        self.max_length = max_length
+
+        self.antialias = antialias
+
+        # https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/data/transforms.py#L41
+        IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+        IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+        self.register_buffer(
+            "mean", torch.Tensor(IMAGENET_DEFAULT_MEAN), persistent=False
+        )
+        self.register_buffer(
+            "std", torch.Tensor(IMAGENET_DEFAULT_STD), persistent=False
+        )
+
+
+        self.ucg_rate = ucg_rate
+        self.unsqueeze_dim = unsqueeze_dim
+        self.stored_batch = None
+        # self.model.visual.output_tokens = output_tokens
+        self.output_tokens = output_tokens # output
+        self.output_cls = output_cls
+        # self.output_tokens = False
+
+    def preprocess(self, x):
+        # normalize to [0,1]
+        x = kornia.geometry.resize(
+            x,
+            (224, 224),
+            interpolation="bicubic",
+            align_corners=True,
+            antialias=self.antialias,
+        )
+        x = (x + 1.0) / 2.0
+        # renormalize according to clip
+        x = kornia.enhance.normalize(x, self.mean, self.std)
+        return x
+
+    def freeze(self):
+        self.model = self.model.eval()
+        for param in self.parameters():
+            param.requires_grad = False
+        
+    def _model_forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+    def encode_with_vision_transformer(self, img, **kwargs):
+        # if self.max_crops > 0:
+        #    img = self.preprocess_by_cropping(img)
+        if img.dim() == 5:
+            # assert self.max_crops == img.shape[1]
+            img = rearrange(img, "b n c h w -> (b n) c h w")
+        img = self.preprocess(img)
+
+        # https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/models/vision_transformer.py#L326
+        if not self.output_cls:
+            return self._model_forward(img, is_training=True, **kwargs)['x_norm_patchtokens']  # to return spatial tokens
+
+        else:
+            dino_ret_dict = self._model_forward( img, is_training=True)  # to return spatial tokens
+            x_patchtokens, x_norm_clstoken = dino_ret_dict['x_norm_patchtokens'], dino_ret_dict['x_norm_clstoken']
+
+            return x_norm_clstoken, x_patchtokens
+
+    @autocast
+    def forward(self, image, no_dropout=False, **kwargs):
+        tokens = self.encode_with_vision_transformer(image, **kwargs)
+        z = None
+        if self.output_cls:
+            z, tokens = z[0], z[1]
+            z = z.to(image.dtype)
+        tokens = tokens.to(image.dtype) # ! return spatial tokens only
+        if self.ucg_rate > 0.0 and not no_dropout and not (self.max_crops > 0):
+            if z is not None:
+                z = (
+                    torch.bernoulli(
+                        (1.0 - self.ucg_rate) * torch.ones(z.shape[0], device=z.device)
+                    )[:, None]
+                    * z
+                )
+            tokens = (
+                expand_dims_like(
+                    torch.bernoulli(
+                        (1.0 - self.ucg_rate)
+                        * torch.ones(tokens.shape[0], device=tokens.device)
+                    ),
+                    tokens,
+                )
+                * tokens
+            )
+        if self.output_cls:
+            return tokens, z
+        else:
+            return tokens
+
+
+class FrozenDinov2ImageEmbedderMV(FrozenDinov2ImageEmbedder):
+    def __init__(self, 
+        arch="vitl",
+        version="dinov2", # by default
+        device="cuda",
+        max_length=77,
+        freeze=True,
+        antialias=True,
+        ucg_rate=0.0,
+        unsqueeze_dim=False,
+        repeat_to_max_len=False,
+        num_image_crops=0,
+        output_tokens=False,
+        output_cls=False,
+        init_device=None,
+        # mv cond settings
+        n_cond_frames=4, # numebr of condition views
+        enable_bf16=False,
+        modLN=False,
+    ):
+        super().__init__(
+            arch,
+            version,
+            device,
+            max_length,
+            freeze,
+            antialias,
+            ucg_rate,
+            unsqueeze_dim,
+            repeat_to_max_len,
+            num_image_crops,
+            output_tokens,
+            output_cls,
+            init_device,
+        )
+        self.n_cond_frames = n_cond_frames
+        self.dtype = torch.bfloat16 if enable_bf16 else torch.float32
+        self.enable_bf16 = enable_bf16
+
+        # ! proj c_cond to features
+
+        hidden_size = self.model.embed_dim # 768 for vit-b
+
+        self.cam_proj = CaptionEmbedder(25, hidden_size,
+                                                act_layer=approx_gelu)
+
+        # ! single-modLN
+        self.model.modLN_modulation = nn.Sequential(
+            nn.SiLU(), nn.Linear(hidden_size, 4 * hidden_size, bias=True))
+
+        # zero-init modLN
+        nn.init.constant_(self.model.modLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.model.modLN_modulation[-1].bias, 0)
+
+        # inject modLN to dino block
+        for block in self.model.blocks:
+            block.scale_shift_table = nn.Parameter(
+                torch.zeros(4, hidden_size)) # zero init also
+
+                # torch.randn(4, hidden_size) / hidden_size**0.5)
+
+
+    def _model_forward(self, x, *args, **kwargs):
+        # re-define model forward, finetune dino-v2.
+        assert self.training
+
+        # ? how to send in camera
+        # c = 0 # placeholder
+        # ret = self.model.forward_features(*args, **kwargs)
+        
+
+        with torch.cuda.amp.autocast(dtype=self.dtype,
+                                    enabled=True):
+
+            x = self.model.prepare_tokens_with_masks(x, masks=None)
+
+            B, N, C = x.shape
+            # TODO how to send in c
+            # c = torch.ones(B, 25).to(x) # placeholder
+            c = kwargs.get('c')
+            c = self.cam_proj(c)
+            cond = self.model.modLN_modulation(c)
+
+
+            # https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/layers/block.py#L89
+            for blk in self.model.blocks: # inject modLN
+
+                shift_msa, scale_msa, shift_mlp, scale_mlp = (
+                    blk.scale_shift_table[None] + cond.reshape(B, 4, -1)).chunk(4, dim=1)
+
+                def attn_residual_func(x: torch.Tensor) -> torch.Tensor:
+                    # return blk.ls1(blk.attn(blk.norm1(x), attn_bias=attn_bias))
+                    return blk.ls1(blk.attn(t2i_modulate(blk.norm1(x), shift_msa, scale_msa)))
+
+                def ffn_residual_func(x: torch.Tensor) -> torch.Tensor:
+                    # return blk.ls2(blk.mlp(blk.norm2(x)))
+                    return blk.ls2(
+                        t2i_modulate(blk.mlp(blk.norm2(x)), shift_mlp, scale_mlp)
+                    )
+
+                x = x + blk.drop_path1(attn_residual_func(x)) # all drop_path identity() here.
+                x = x + blk.drop_path2(ffn_residual_func(x))
+
+            x_norm = self.model.norm(x)
+
+        return {
+                "x_norm_clstoken": x_norm[:, 0],
+                # "x_norm_regtokens": x_norm[:, 1 : self.model.num_register_tokens + 1],
+                "x_norm_patchtokens": x_norm[:, self.model.num_register_tokens + 1 :],
+                # "x_prenorm": x,
+                # "masks": masks,
+            }
+
+    @autocast
+    def forward(self, img_c, no_dropout=False):
+
+        # if self.enable_bf16:
+        #     with th.cuda.amp.autocast(dtype=self.dtype,
+        #                               enabled=True):
+                # mv_image = super().forward(mv_image[:, 1:1+self.n_cond_frames].to(torch.bf16))
+        # else:
+        mv_image, c = img_c['img'], img_c['c']
+        mv_image = super().forward(mv_image[:, 1:1+self.n_cond_frames], c=rearrange(c[:, 1:1+self.n_cond_frames], "b t ... -> (b t) ...", t=self.n_cond_frames))
+
+        mv_image = rearrange(mv_image, "(b t) ... -> b t ...", t=self.n_cond_frames)
+
+        return mv_image
 
 
 class FrozenCLIPT5Encoder(AbstractEmbModel):
@@ -1044,3 +1319,26 @@ class FrozenOpenCLIPImagePredictionEmbedder(AbstractEmbModel):
         vid = repeat(vid, "b t d -> (b s) t d", s=self.n_copies)
 
         return vid
+
+class FrozenOpenCLIPImageMVEmbedder(AbstractEmbModel):
+    # for multi-view 3D diffusion condition. Only extract the first frame
+    def __init__(
+        self,
+        open_clip_embedding_config: Dict,
+        # n_cond_frames: int,
+        # n_copies: int,
+    ):
+        super().__init__()
+
+        # self.n_cond_frames = n_cond_frames
+        # self.n_copies = n_copies
+        self.open_clip = instantiate_from_config(open_clip_embedding_config)
+
+    def forward(self, vid):
+        # st()
+        vid = self.open_clip(vid[:, 0, ...])
+        # vid = rearrange(vid, "(b t) d -> b t d", t=self.n_cond_frames)
+        # vid = repeat(vid, "b t d -> (b s) t d", s=self.n_copies)
+
+        return vid
+

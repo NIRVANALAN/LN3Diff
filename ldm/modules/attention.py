@@ -7,11 +7,16 @@ from einops import rearrange, repeat
 from pdb import set_trace as st
 
 from ldm.modules.diffusionmodules.util import checkpoint
+from apex.normalization import FusedLayerNorm as LayerNorm
 
 
 # CrossAttn precision handling
 import os
 _ATTN_PRECISION = os.environ.get("ATTN_PRECISION", "fp32")
+from xformers.ops import MemoryEfficientAttentionFlashAttentionOp
+# from xformers.ops import RMSNorm, fmha, rope_padded
+# import apex
+from apex.normalization import FusedRMSNorm as RMSNorm
 
 
 def exists(val):
@@ -222,7 +227,7 @@ class CrossAttention(nn.Module):
 
 
 try:
-    from xformers.triton import FusedLayerNorm as LayerNorm
+    # from xformers.triton import FusedLayerNorm as LayerNorm
     import xformers
     import xformers.ops
     XFORMERS_IS_AVAILBLE = True
@@ -233,7 +238,7 @@ from typing import Optional, Any
 
 class MemoryEfficientCrossAttention(nn.Module):
     # https://github.com/MatthieuTPHR/diffusers/blob/d80b531ff8060ec1ea982b65a1b8df70f73aa67c/src/diffusers/models/attention.py#L223
-    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0):
+    def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0, enable_rmsnorm=False, qk_norm=False):
         super().__init__()
         print(f"Setting up {self.__class__.__name__}. Query dim is {query_dim}, context_dim is {context_dim} and using "
               f"{heads} heads.")
@@ -245,15 +250,30 @@ class MemoryEfficientCrossAttention(nn.Module):
 
         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+
+        # if enable_rmsnorm:
+        # self.q_rmsnorm = RMSNorm(query_dim, eps=1e-5)
+        # self.k_rmsnorm = RMSNorm(context_dim, eps=1e-5)
+
+        self.q_norm = RMSNorm(self.dim_head, elementwise_affine=True) if qk_norm else nn.Identity()
+        self.k_norm = RMSNorm(self.dim_head, elementwise_affine=True) if qk_norm else nn.Identity()
+
+        # self.enable_rmsnorm = enable_rmsnorm
+
         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
+        # self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        # self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
         self.attention_op: Optional[Any] = None
+        # self.attention_op: Optional[Any] = MemoryEfficientAttentionFlashAttentionOp
+
 
     def forward(self, x, context=None, mask=None):
         q = self.to_q(x)
         context = default(context, x)
         k = self.to_k(context)
+
         v = self.to_v(context)
 
         b, _, _ = q.shape
@@ -265,6 +285,7 @@ class MemoryEfficientCrossAttention(nn.Module):
             .contiguous(),
             (q, k, v),
         )
+        q, k = self.q_norm(q), self.k_norm(k) # for stable amp training
 
         # actually compute the attention, what we cannot get enough of
         out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)

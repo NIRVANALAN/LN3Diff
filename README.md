@@ -145,7 +145,7 @@ If you want to reuse your own PyTorch environment, install the following package
 # first, check whether you have installed pytorch (>=2.0) and xformer.
 conda install -c conda-forge openexr-python git
 pip install openexr lpips imageio kornia opencv-python tensorboard tqdm timm ffmpeg einops beartype imageio[ffmpeg] blobfile ninja lmdb webdataset opencv-python click torchdiffeq transformers
-pip install git+https://github.com/nupurkmr9/vision-aided-gan.
+pip install git+https://github.com/nupurkmr9/vision-aided-gan
 ```
 
 ## :running_woman: Inference

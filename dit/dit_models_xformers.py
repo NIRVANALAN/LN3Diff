@@ -23,26 +23,59 @@ from pdb import set_trace as st
 # support flash attention and xformer acceleration
 from ldm.modules.attention import CrossAttention
 from vit.vision_transformer import MemEffAttention as Attention
+# import apex
+from apex.normalization import FusedRMSNorm as RMSNorm
+from apex.normalization import FusedLayerNorm as LayerNorm
 
 # from torch.nn import LayerNorm
 # from xformers import triton
 # import xformers.triton
 
 if torch.cuda.is_available():
-    from xformers.triton import FusedLayerNorm as LayerNorm
+    # from xformers.triton import FusedLayerNorm as LayerNorm # compat issue
     from xformers.components.activations import build_activation, Activation
     from xformers.components.feedforward import fused_mlp
 
-from ldm.modules.attention import MemoryEfficientCrossAttention
+from ldm.modules.attention import MemoryEfficientCrossAttention, JointMemoryEfficientCrossAttention
 
 
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
+def t2i_modulate(x, shift, scale):  # for pix-art arch
+    return x * (1 + scale) + shift
+
+
 #################################################################################
 #               Embedding Layers for Timesteps and Class Labels                 #
 #################################################################################
+
+
+class T2IFinalLayer(nn.Module):
+    """
+    The final layer of PixArt.
+    """
+    # from apex.normalization import FusedLayerNorm as LayerNorm
+
+    def __init__(self, hidden_size, patch_size, out_channels):
+        super().__init__()
+        # self.norm_final = LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.norm_final = LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.linear = nn.Linear(hidden_size,
+                                patch_size * patch_size * out_channels,
+                                bias=True)
+        self.scale_shift_table = nn.Parameter(
+            torch.randn(2, hidden_size) / hidden_size**0.5)
+        self.adaLN_modulation = None
+        self.out_channels = out_channels
+
+    def forward(self, x, t):
+        shift, scale = (self.scale_shift_table[None] + t[:, None]).chunk(2,
+                                                                         dim=1)
+        x = t2i_modulate(self.norm_final(x), shift, scale)
+        x = self.linear(x)
+        return x
 
 
 class TimestepEmbedder(nn.Module):
@@ -194,23 +227,40 @@ class DiTBlock(nn.Module):
     A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
     """
 
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 mlp_ratio=4.0,
+                 context_dim=None,
+                 enable_rmsnorm=False,
+                 norm_type='layernorm',
+                 qk_norm=False,
+                 **block_kwargs):
         super().__init__()
+        # st()
         # nn.LayerNorm
-        self.norm1 = LayerNorm(
-            hidden_size,
-            affine=False,
-            #   elementwise_affine=False,
-            eps=1e-6)
+        if norm_type == 'layernorm':
+            self.norm1 = LayerNorm(
+                hidden_size,
+                # affine=False,
+                  elementwise_affine=False,
+                eps=1e-6)
+            self.norm2 = LayerNorm(
+                hidden_size,
+                # affine=False,
+                elementwise_affine=False,
+                eps=1e-6)
+        else:
+            assert norm_type == 'rmsnorm'  # more robust to bf16 training.
+            self.norm1 = RMSNorm(hidden_size, eps=1e-5)
+            self.norm2 = RMSNorm(hidden_size, eps=1e-5)
+
         self.attn = Attention(hidden_size,
                               num_heads=num_heads,
                               qkv_bias=True,
+                              enable_rmsnorm=enable_rmsnorm,
+                              qk_norm=qk_norm,
                               **block_kwargs)
-        self.norm2 = LayerNorm(
-            hidden_size,
-            #   elementwise_affine=False,
-            affine=False,
-            eps=1e-6)
         # mlp_hidden_dim = int(hidden_size * mlp_ratio)
         # approx_gelu = lambda: nn.GELU(approximate="tanh")
 
@@ -267,6 +317,239 @@ class TextCondDiTBlock(DiTBlock):
         return x
 
 
+class PixelArtTextCondDiTBlock(DiTBlock):
+    # 1. add shared AdaLN
+    # 2. add return pooled vector token (in the outer loop already)
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 mlp_ratio=4,
+                 context_dim=None,
+                 **block_kwargs):
+        super().__init__(hidden_size,
+                         num_heads,
+                         mlp_ratio,
+                         norm_type='rmsnorm',
+                         **block_kwargs)
+        # super().__init__(hidden_size, num_heads, mlp_ratio, norm_type='layernorm', **block_kwargs)
+        self.cross_attn = MemoryEfficientCrossAttention(
+            query_dim=hidden_size, context_dim=context_dim, heads=num_heads)
+        self.scale_shift_table = nn.Parameter(
+            torch.randn(6, hidden_size) / hidden_size**0.5)
+        self.adaLN_modulation = None
+        self.attention_y_norm = RMSNorm(
+            context_dim, eps=1e-5
+        )  # https://github.com/Alpha-VLLM/Lumina-T2X/blob/0c8dd6a07a3b7c18da3d91f37b1e00e7ae661293/lumina_t2i/models/model.py#L570C9-L570C61
+
+    def forward(self, x, t, context):
+        B, N, C = x.shape
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        #    self.scale_shift_table[None] + t.reshape(B,6,-1)).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        #     t).chunk(6, dim=1)
+
+        x = x + gate_msa * self.attn(
+            t2i_modulate(self.norm1(x), shift_msa, scale_msa))
+
+        # add text embedder via cross attention
+        x = x + self.cross_attn(x, self.attention_y_norm(context))
+
+        x = x + gate_mlp * self.mlp(
+            t2i_modulate(self.norm2(x), shift_mlp, scale_mlp))
+
+        return x
+
+
+class MMTextCondDiTBlock(DiTBlock):
+    # follow SD-3
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4, **block_kwargs):
+        super().__init__(hidden_size, num_heads, mlp_ratio, **block_kwargs)
+        self.cross_attn = MemoryEfficientCrossAttention(query_dim=hidden_size,
+                                                        heads=num_heads)
+        # self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size**0.5)
+
+        self.adaLN_modulation_img = nn.Sequential(
+            nn.SiLU(), nn.Linear(hidden_size, 6 * hidden_size, bias=True))
+
+        self.mlp_img = fused_mlp.FusedMLP(
+            dim_model=hidden_size,
+            dropout=0,
+            activation=Activation.GeLU,
+            hidden_layer_multiplier=int(mlp_ratio),
+        )
+
+    def forward(self, x, t, context):
+        # B, N, C = x.shape
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        #    self.scale_shift_table[None] + t.reshape(B,6,-1)).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+            t).chunk(6, dim=1)
+
+        # TODO, batch inference with above
+        shift_msa_img, scale_msa_img, gate_msa_img, shift_mlp_img, scale_mlp_img, gate_mlp_img = self.adaLN_modulation_img(
+            t).chunk(6, dim=1)
+
+        x = x + gate_msa.unsqueeze(1) * self.attn(
+            modulate(self.norm1(x), shift_msa, scale_msa))
+
+        # add text embedder via cross attention
+        x = x + self.cross_attn(x, context)
+
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(
+            modulate(self.norm2(x), shift_mlp, scale_mlp))
+
+        return x
+
+
+# for image condition
+
+
+class ImageCondDiTBlock(DiTBlock):
+    # follow EMU and SVD, concat + cross attention. Also adopted by concurrent work Direct3D.
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 context_dim,
+                 mlp_ratio=4,
+                 enable_rmsnorm=False,
+                 qk_norm=False,
+                 **block_kwargs):
+        super().__init__(hidden_size=hidden_size,
+                         num_heads=num_heads,
+                         mlp_ratio=mlp_ratio,
+                         context_dim=context_dim,
+                         enable_rmsnorm=enable_rmsnorm,
+                         qk_norm=qk_norm,
+                         **block_kwargs)
+        assert qk_norm
+        self.cross_attn = MemoryEfficientCrossAttention(
+            query_dim=hidden_size,
+            context_dim=context_dim, # ! mv-cond
+            # context_dim=1280,  # clip vit-G, adopted by SVD.
+            # context_dim=1024,  # clip vit-L
+            heads=num_heads,
+            enable_rmsnorm=enable_rmsnorm, 
+            qk_norm=qk_norm)
+        assert qk_norm
+        # self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size**0.5)
+
+        self.attention_y_norm = RMSNorm(
+            1024, eps=1e-5
+        )  # https://github.com/Alpha-VLLM/Lumina-T2X/blob/0c8dd6a07a3b7c18da3d91f37b1e00e7ae661293/lumina_t2i/models/model.py#L570C9-L570C61
+
+    def forward(self, x, t, dino_spatial_token, clip_spatial_token):
+        # B, N, C = x.shape
+        # assert isinstance(context, dict)
+        # assert isinstance(context, dict) # clip + dino.
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        #    self.scale_shift_table[None] + t.reshape(B,6,-1)).chunk(6, dim=1)
+
+        # TODO t is t + [clip_cls] here. update in base class.
+
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+            t).chunk(6, dim=1)
+
+        post_modulate_selfattn_feat = torch.cat([
+            modulate(self.norm1(x), shift_msa, scale_msa), dino_spatial_token
+        ],
+                                                dim=1)  # concat in L dim
+
+        x = x + gate_msa.unsqueeze(1) * self.attn(
+            post_modulate_selfattn_feat
+        )[:, :x.shape[1]]  # remove dino-feat to maintain unchanged dimension.
+
+        # add clip_i spatial embedder via cross attention
+        x = x + self.cross_attn(x, self.attention_y_norm(clip_spatial_token))
+
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(
+            modulate(self.norm2(x), shift_mlp, scale_mlp))
+
+        return x
+
+
+class ImageCondDiTBlockPixelArt(ImageCondDiTBlock):
+    # follow EMU and SVD, concat + cross attention. Also adopted by concurrent work Direct3D.
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 context_dim,
+                 mlp_ratio=4,
+                 enable_rmsnorm=False,
+                 qk_norm=False,
+                 **block_kwargs):
+        # super().__init__(hidden_size, num_heads, mlp_ratio, enable_rmsnorm=True, **block_kwargs)
+        super().__init__(hidden_size=hidden_size,
+                         num_heads=num_heads,
+                         mlp_ratio=mlp_ratio,
+                         context_dim=context_dim,
+                         enable_rmsnorm=False,
+                         qk_norm=True, # otherwise AMP fail
+                         **block_kwargs)
+        self.scale_shift_table = nn.Parameter(
+            torch.randn(6, hidden_size) / hidden_size**0.5)
+        self.adaLN_modulation = None  # single-adaLN
+        # self.attention_y_norm = RMSNorm(
+        #     1024, eps=1e-5
+        # )  # https://github.com/Alpha-VLLM/Lumina-T2X/blob/0c8dd6a07a3b7c18da3d91f37b1e00e7ae661293/lumina_t2i/models/model.py#L570C9-L570C61
+
+    def forward(self, x, t, dino_spatial_token, clip_spatial_token):
+        B, N, C = x.shape
+        # assert isinstance(context, dict)
+        # assert isinstance(context, dict) # clip + dino.
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        #    self.scale_shift_table[None] + t.reshape(B,6,-1)).chunk(6, dim=1)
+
+        # TODO t is t + [clip_cls] here. update in base class.
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        # t).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
+        # st()
+
+        post_modulate_selfattn_feat = torch.cat([
+            t2i_modulate(self.norm1(x), shift_msa, scale_msa),
+            dino_spatial_token
+        ],
+                                                dim=1)  # concat in L dim
+
+        # x = x + gate_msa.unsqueeze(1) * self.attn(
+        x = x + gate_msa * self.attn(post_modulate_selfattn_feat)[:, :x.shape[
+            1]]  # remove dino-feat to maintain unchanged dimension.
+
+        # add clip_i spatial embedder via cross attention
+        x = x + self.cross_attn(x, clip_spatial_token) # attention_y_norm not required, since x_norm_patchtokens?
+        # x = x + self.cross_attn(x, self.attention_y_norm(clip_spatial_token)) # attention_y_norm not required, since x_norm_patchtokens?
+
+        x = x + gate_mlp * self.mlp(
+            t2i_modulate(self.norm2(x), shift_mlp, scale_mlp))
+
+        return x
+
+
+class ImageCondDiTBlockPixelArtRMSNorm(ImageCondDiTBlockPixelArt):
+    # follow EMU and SVD, concat + cross attention. Also adopted by concurrent work Direct3D.
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 context_dim,
+                 mlp_ratio=4,
+                 **block_kwargs):
+        super().__init__(hidden_size=hidden_size,
+                         num_heads=num_heads,
+                         mlp_ratio=mlp_ratio,
+                         context_dim=context_dim,
+                         enable_rmsnorm=False,
+                         norm_type='rmsnorm',
+                         **block_kwargs)
+
+
 class DiTBlockRollOut(DiTBlock):
     """
     A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
@@ -283,7 +566,7 @@ class DiTBlockRollOut(DiTBlock):
         x = x + gate_mlp.unsqueeze(1) * self.mlp(
             modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
-
+# 
 
 class FinalLayer(nn.Module):
     """
@@ -295,8 +578,8 @@ class FinalLayer(nn.Module):
         # self.norm_final = nn.LayerNorm(hidden_size,
         self.norm_final = LayerNorm(
             hidden_size,
-            #    elementwise_affine=False,
-            affine=False,
+               elementwise_affine=False,#  apex or nn kernel
+            # affine=False,
             eps=1e-6)
         self.linear = nn.Linear(hidden_size,
                                 patch_size * patch_size * out_channels,
@@ -338,8 +621,10 @@ class DiT(nn.Module):
     ):
         super().__init__()
         self.plane_n = 3
+        # st()
 
         self.depth = depth
+        self.mlp_ratio = mlp_ratio
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
@@ -376,8 +661,10 @@ class DiT(nn.Module):
 
         # if not self.roll_out:
         self.blocks = nn.ModuleList([
-            vit_blk(hidden_size, num_heads, mlp_ratio=mlp_ratio)
-            for _ in range(depth)
+            vit_blk(hidden_size=hidden_size,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    context_dim=context_dim) for _ in range(depth)
         ])
         # else:
         #     self.blocks = nn.ModuleList([
@@ -435,12 +722,15 @@ class DiT(nn.Module):
 
         # Zero-out adaLN modulation layers in DiT blocks:
         for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+            if block.adaLN_modulation is not None:
+                nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+                nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
 
         # Zero-out output layers:
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+        if self.final_layer.adaLN_modulation is not None:
+            nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
@@ -478,6 +768,8 @@ class DiT(nn.Module):
 
         if get_attr != '':  # not breaking the forward hooks
             return getattr(self, get_attr)
+
+        st()
 
         t = self.t_embedder(timesteps)  # (N, D)
 
