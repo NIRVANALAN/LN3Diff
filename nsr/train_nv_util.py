@@ -1190,15 +1190,10 @@ class TrainLoop3DRecNVPatchSingleForward(TrainLoop3DRecNVPatch):
 
         for eval_idx, micro in enumerate(tqdm(self.eval_data)):
 
-            # if eval_idx > 500:
-            #     break
-
             latent = self.rec_model(
-                img=micro['img_to_encoder'][:4],
+                img=micro['img_to_encoder'],
                 behaviour='encoder_vae')  # pred: (B, 3, 64, 64)
             # torchvision.utils.save_image(micro['img'], 'inp.jpg')
-            if micro['img'].shape[0] == 40:
-                assert eval_batch_size == 40
 
             if save_latent:
                 # np.save(f'{logger.get_dir()}/latent_dir/{eval_idx}.npy', latent[self.latent_name].cpu().numpy())
@@ -1212,21 +1207,6 @@ class TrainLoop3DRecNVPatchSingleForward(TrainLoop3DRecNVPatch):
                     micro['ins'][0] == micro['ins'][i]
                     for i in range(micro['c'].shape[0])
                 ])  # ! assert same instance
-
-                # for i in range(micro['img'].shape[0]):
-
-                #     compressed_sample = {
-                #         'latent':latent[self.latent_name][0].cpu().numpy(), # 12 32 32
-                #         'caption': micro['caption'][0].encode('utf-8'),
-                #         'ins': micro['ins'][0].encode('utf-8'),
-                #         'c': micro['c'][i].cpu().numpy(),
-                #         'img': micro['img'][i].cpu().numpy() # 128x128, for diffusion log
-                #     }
-
-                #     sink.write({
-                #         "__key__": f"sample_{eval_idx*eval_batch_size+i:07d}",
-                #         'sample.pyd': compressed_sample
-                #     })
 
             if eval_idx < 50:
                 # if False:

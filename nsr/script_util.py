@@ -14,7 +14,7 @@ import vit.vision_transformer as vits
 from guided_diffusion import logger
 from .confnet import ConfNet
 
-from ldm.modules.diffusionmodules.model import Encoder, MVEncoder, MVEncoderGS
+from ldm.modules.diffusionmodules.model import Encoder, MVEncoder, MVEncoderGS, MVEncoderGSDynamicInp
 from ldm.modules.diffusionmodules.mv_unet import MVUNet, LGM_MVEncoder
 
 # from ldm.modules.diffusionmodules.openaimodel import MultiViewUNetModel_Encoder
@@ -796,6 +796,38 @@ def rendering_options_defaults(opts):
         rendering_options['z_near'] = rendering_options['radius_range'][0]+rendering_options['sampler_bbox_min']
         rendering_options['z_far'] = rendering_options['radius_range'][1]+rendering_options['sampler_bbox_max']
 
+    elif opts.cfg == 'objverse_tuneray_aug_resolution_96_96_auto':  # to differentiate hwc
+        rendering_options.update({
+            'depth_resolution':
+            96,
+            'depth_resolution_importance':
+            96,
+            # * radius 1.2 setting, newly rendered images
+            'ray_start':
+            'auto',
+            'ray_end':
+            'auto',
+            'box_warp':
+            0.9,
+            'white_back':
+            True,
+            'radius_range': [1.5,2],
+            'sampler_bbox_min':
+            -0.45,
+            'sampler_bbox_max':
+            0.45,
+            'filter_out_of_bbox':
+            True,
+            'PatchRaySampler':
+            True,
+            'patch_rendering_resolution':
+            opts.patch_rendering_resolution,
+        })
+        rendering_options['z_near'] = rendering_options['radius_range'][0]+rendering_options['sampler_bbox_min']
+        rendering_options['z_far'] = rendering_options['radius_range'][1]+rendering_options['sampler_bbox_max']
+
+
+
     elif opts.cfg == 'shapenet_tuneray_aug_resolution_64_96_nearestResidualSR':  # to differentiate hwc
         rendering_options.update({
             'depth_resolution':
@@ -883,6 +915,7 @@ def model_encoder_defaults():
         sd_E_ch=64,
         z_channels=3*4,
         sd_E_num_res_blocks=1,
+        num_frames=4,
         # vit_decoder
         arch_dit_decoder='DiT2-B/2',
         return_all_dit_layers=False,
@@ -891,6 +924,7 @@ def model_encoder_defaults():
         # sd_D_res_blocks=1,
         # sd_D_res_blocks=1,
         lrm_decoder=False,
+        plane_n=3,
         gs_rendering=False,
     )
 
@@ -1032,6 +1066,7 @@ def dataset_defaults():
         append_depth=False,
         plucker_embedding=False,
         gs_cam_format=False,
+        split_chunk_size=8,
     )
     return res
 
@@ -1127,6 +1162,7 @@ def create_3DAE_model(
         sd_E_ch=64,
         z_channels=3*4,
         sd_E_num_res_blocks=1,
+        num_frames=6,
         arch_dit_decoder='DiT2-B/2',
         lrm_decoder=False,
         gs_rendering=False,
@@ -1218,24 +1254,13 @@ def create_3DAE_model(
                     up_channels=(1024, 1024, 512, 256,
                                  128),  # one more decoder
                     up_attention=(True, True, True, False, False),
-                    # splat_size=128,
-                    # output_size=
-                    # 512,  # render & supervise Gaussians at a higher resolution.
-                    # batch_size=8,
-                    # num_views=8,
-                    # gradient_accumulation_steps=1,
-                    # mixed_precision='bf16',
                 )
 
-            elif 'gs' in dino_version:
-                encoder_cls = MVEncoderGS
-                attn_kwargs = {
-                    'n_heads': 8,
-                    'd_head': 64,
-                }
-
             else:
-                encoder_cls = MVEncoder
+                if 'dynaInp' in dino_version:
+                    encoder_cls = MVEncoderGSDynamicInp
+                else:
+                    encoder_cls = MVEncoder
                 attn_kwargs = {
                     'n_heads': 8,
                     'd_head': 64,
@@ -1258,6 +1283,7 @@ def create_3DAE_model(
                 ch_mult=[1, 2, 4, 4],
                 # num_res_blocks=1,
                 num_res_blocks=sd_E_num_res_blocks,
+                num_frames=num_frames,
                 dropout=0.0,
                 attn_resolutions=[],
                 out_ch=3,  # unused

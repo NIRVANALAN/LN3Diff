@@ -13,9 +13,6 @@ from apex.normalization import FusedLayerNorm as LayerNorm
 from apex.normalization import FusedRMSNorm as RMSNorm
 from timm.models.vision_transformer import Mlp
 
-from vit.vit_triplane import XYZPosEmbed
-
-
 class DiT_I23D(DiT):
     # DiT with 3D_aware operations
     def __init__(

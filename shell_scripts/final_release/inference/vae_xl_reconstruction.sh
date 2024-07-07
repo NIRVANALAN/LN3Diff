@@ -19,8 +19,8 @@ image_size_encoder=256
 patch_size=14
 kl_lambda=1.0e-06
 patch_rendering_resolution=56 # 
-batch_size=4 # 
-microbatch=4 # 
+batch_size=6 # 
+microbatch=6 # 
 
 
 # use g-buffer Objaverse data path here. check readme for more details.
@@ -52,7 +52,7 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --batch_size $batch_size --save_interval 10000 \
  --microbatch ${microbatch} \
  --image_size_encoder $image_size_encoder \
- --dino_version mv-sd-dit \
+ --dino_version mv-sd-dit-dynaInp-trilatent \
  --sr_training False \
  --cls_token False \
  --weight_decay 0.05 \
@@ -73,11 +73,12 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
- --resume_checkpoint checkpoints/objaverse/model_rec1680000.pt \
+ --resume_checkpoint checkpoints/objaverse/vae/model_rec1890000.pt \
  "
 
 # the path to save the extracted latents.
-logdir="./logs/vae-reconstruction/objav/vae/infer-latents"
+# logdir="./logs/vae-reconstruction/objav/vae/infer-latents"
+logdir="./logs/vae-reconstruction/objav/vae-xl/infer-latents"
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -105,8 +106,8 @@ export LC_ALL=en_US.UTF-8
 
 export OPENCV_IO_ENABLE_OPENEXR=1
 export OMP_NUM_THREADS=12
-export NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_IB_GID_INDEX=3 # https://github.com/huggingface/accelerate/issues/314#issuecomment-1821973930
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_IB_GID_INDEX=3 # https://github.com/huggingface/accelerate/issues/314#issuecomment-1821973930
 export CUDA_VISIBLE_DEVICES=0
 
 
@@ -129,10 +130,10 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --decomposed True \
  --logdir $logdir \
  --decoder_load_pretrained False \
- --cfg objverse_tuneray_aug_resolution_64_64_auto \
+ --cfg objverse_tuneray_aug_resolution_96_96_auto \
  --patch_size ${patch_size} \
  --use_amp False \
- --eval_batch_size 4 \
+ --eval_batch_size $batch_size \
  ${LR_FLAGS} \
  --l1_lambda ${l1_lambda} \
  --l2_lambda ${l2_lambda} \

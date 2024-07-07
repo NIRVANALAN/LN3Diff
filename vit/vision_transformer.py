@@ -26,17 +26,21 @@ from torch import Tensor, pixel_shuffle
 
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-from torch.nn.modules import GELU, LayerNorm
+from torch.nn.modules import GELU
 
 # from vit.vision_transformer import Conv3DCrossAttentionBlock
 
 from .utils import trunc_normal_
 
 from pdb import set_trace as st
+# import apex
+from apex.normalization import FusedRMSNorm as RMSNorm
+from apex.normalization import FusedLayerNorm as LayerNorm
 
 try:
     from xformers.ops import memory_efficient_attention, unbind, fmha
     from xformers.ops import MemoryEfficientAttentionFlashAttentionOp
+    # from xformers.ops import RMSNorm
 
     XFORMERS_AVAILABLE = True
 except ImportError:
@@ -52,7 +56,9 @@ class Attention(nn.Module):
                  qkv_bias=False,
                  qk_scale=None,
                  attn_drop=0.,
-                 proj_drop=0.):
+                 proj_drop=0., 
+                 enable_rmsnorm=False,
+                 qk_norm=False,):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -62,6 +68,14 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        # https://github.com/huggingface/pytorch-image-models/blob/5dce71010174ad6599653da4e8ba37fd5f9fa572/timm/models/vision_transformer.py#L79C1-L80C78
+        self.q_norm = RMSNorm(head_dim, elementwise_affine=True) if qk_norm else nn.Identity() # sd-3 
+        self.k_norm = RMSNorm(head_dim, elementwise_affine=True) if qk_norm else nn.Identity()
+
+        # if qk_norm:
+        #     self.q_norm = LayerNorm(dim, eps=1e-5)
+        #     self.k_norm = LayerNorm(dim, eps=1e-5)
+        self.qk_norm = qk_norm
 
     def forward(self, x):
         B, N, C = x.shape
@@ -89,11 +103,40 @@ class MemEffAttention(Attention):
 
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
-
         q, k, v = unbind(qkv, 2)
+        q, k = self.q_norm(q), self.k_norm(k)
 
-        x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
-        # x = memory_efficient_attention(q, k, v, attn_bias=attn_bias, op=MemoryEfficientAttentionFlashAttentionOp)
+        x = memory_efficient_attention(q, k, v, attn_bias=attn_bias) # if not bf16, no flash-attn here.
+        # x = memory_efficient_attention(q, k, v, attn_bias=attn_bias, op=MemoryEfficientAttentionFlashAttentionOp) # force flash attention
+        x = x.reshape([B, N, C])
+
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+class MemEffCrossAttention(MemEffAttention):
+    # for cross attention, where context serves as k and v
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0, proj_drop=0):
+        super().__init__(dim, num_heads, qkv_bias, qk_scale, attn_drop, proj_drop)
+        del self.qkv
+        self.q = nn.Linear(dim, dim * 1, bias=qkv_bias)
+        self.kv = nn.Linear(dim, dim * 2, bias=qkv_bias)
+
+    def forward(self, x: Tensor, context: Tensor, attn_bias=None) -> Tensor:
+        if not XFORMERS_AVAILABLE:
+            assert attn_bias is None, "xFormers is required for nested tensors usage"
+            return super().forward(x)
+
+        B, N, C = x.shape
+        # qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
+        q = self.q(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+        kv = self.kv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
+        k, v = unbind(kv, 2)
+
+        # x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+        x = memory_efficient_attention(q, k, v, attn_bias=attn_bias, op=MemoryEfficientAttentionFlashAttentionOp)
         x = x.reshape([B, N, C])
 
         x = self.proj(x)
@@ -2507,7 +2550,8 @@ class Block(nn.Module):
                  norm_layer=nn.LayerNorm):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(dim,
+        # self.attn = Attention(dim,
+        self.attn = MemEffAttention(dim,
                               num_heads=num_heads,
                               qkv_bias=qkv_bias,
                               qk_scale=qk_scale,

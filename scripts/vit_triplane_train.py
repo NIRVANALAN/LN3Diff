@@ -169,16 +169,9 @@ def training_loop(args):
                     reso=args.image_size,
                     reso_encoder=args.image_size_encoder,  # 224 -> 128
                     num_workers=args.num_workers,
-                    load_depth=True,
-                    preprocess=auto_encoder.preprocess,  # clip
-                    dataset_size=args.dataset_size,
-                    trainer_name=args.trainer_name,
-                    use_lmdb=args.use_lmdb,
-                    use_wds=args.use_wds,
-                    use_lmdb_compressed=args.use_lmdb_compressed,
-                    plucker_embedding=args.plucker_embedding
-                    # load_depth=True # for evaluation
-                )
+                    **args_to_dict(args,
+                                   dataset_defaults().keys())
+                                   )
 
             if args.pose_warm_up_iter > 0:
                 overfitting_dataset = load_memory_data(

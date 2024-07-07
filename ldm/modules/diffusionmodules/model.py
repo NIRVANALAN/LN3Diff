@@ -600,6 +600,27 @@ class MVEncoderGS(Encoder):
 
         return h # B 16 H W when V=4, z_channels=2
 
+class MVEncoderGSDynamicInp(Encoder):
+    # support dynamic length input, e.g., up to 40 views during training/inference.
+    def __init__(self, *, ch, out_ch, ch_mult=(1, 2, 4, 8), num_res_blocks, attn_resolutions, dropout=0, resamp_with_conv=True, in_channels, resolution, z_channels, double_z=True, use_linear_attn=False, attn_type="mv-vanilla", num_frames, **ignore_kwargs):
+        super().__init__(ch=ch, out_ch=out_ch, ch_mult=ch_mult, num_res_blocks=num_res_blocks, attn_resolutions=attn_resolutions, dropout=dropout, resamp_with_conv=resamp_with_conv, in_channels=in_channels, resolution=resolution, z_channels=z_channels, double_z=double_z, use_linear_attn=use_linear_attn, attn_type=attn_type,
+            add_fusion_layer=False,
+            **ignore_kwargs)
+        self.num_frames = num_frames
+ 
+    def forward(self, x, num_frames=None):
+        h = super().forward(x, num_frames=self.num_frames)
+        # multi-view aggregation, as in pixel-nerf
+
+        if num_frames is None:
+            num_frames = self.num_frames # 4 for now, test later.        
+        
+        assert num_frames > 4
+
+        h = h.chunk(x.shape[0] // num_frames) # features from the same single instance aggregated here
+        h = [feat.mean(keepdim=True, dim=0) for feat in h] # average pooling, 1 C H W for each h
+
+        return torch.cat(h, dim=0)
 
 class Decoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,

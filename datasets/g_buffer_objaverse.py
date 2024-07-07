@@ -68,7 +68,8 @@ def resize_depth_mask_Tensor(depth_to_resize, resolution):
         depth_resized = torch.nn.functional.interpolate(
             input=depth_to_resize.unsqueeze(1),
             size=(resolution, resolution),
-            mode='bilinear',
+            # mode='bilinear',
+            mode='nearest',
             align_corners=False,
         ).squeeze(1)
     else:
@@ -164,20 +165,6 @@ def load_data(
         use_lmdb_compressed=False,
         plucker_embedding=False,
         infi_sampler=True):
-    # st()
-    # dataset_cls = {
-    #     'input_rec': MultiViewDataset,
-    #     'nv': NovelViewDataset,
-    # }[trainer_name]
-    # st()
-    # if use_lmdb:
-    #     logger.log('using LMDB dataset')
-    #     # dataset_cls = LMDBDataset_MV #  2.5-3iter/s, but unstable, drops to 1 later.
-    #     if 'nv' in trainer_name:
-    #         dataset_cls = Objv_LMDBDataset_NV_Compressed  #  2.5-3iter/s, but unstable, drops to 1 later.
-    #     else:
-    #         dataset_cls = Objv_LMDBDataset_MV_Compressed  #  2.5-3iter/s, but unstable, drops to 1 later.
-    #     # dataset = dataset_cls(file_path)
 
     if use_lmdb:
         logger.log('using LMDB dataset')
@@ -521,7 +508,9 @@ def read_dnormal(normald_path, cond_pos, h=None, w=None):
 
     if h is not None:
         assert w is not None
-        depth = cv2.resize(depth, (h, w))  # 512,512, 1 -> self.reso, self.reso
+        # depth = cv2.resize(depth, (h, w))  # 512,512, 1 -> self.reso, self.reso
+        depth = cv2.resize(depth, (h, w), interpolation=cv2.INTER_NEAREST
+                            )  # 512,512, 1 -> self.reso, self.reso
 
     else:
         depth = depth[..., 0]
@@ -749,10 +738,15 @@ class MultiViewObjverseDataset(Dataset):
                 # cur_all_fname = [f'{idx:05d}' for idx in [0, 12, 30, 36]
                 # cur_all_fname = [f'{idx:05d}' for idx in [6,12,18,24]
                 # cur_all_fname = [f'{idx:05d}' for idx in [7,16,24,25]
-                cur_all_fname = [f'{idx:05d}' for idx in [4,12,20,25]
+
+                # cur_all_fname = [f'{idx:05d}' for idx in [4,12,20,25]
+
+                # ! v=6 version infer latent
+                cur_all_fname = [f'{idx:05d}' for idx in [25,0,9,18,27,33]]
+
                 # cur_all_fname = [f'{idx:05d}' for idx in [4,4,4,4]
                 # cur_all_fname = [f'{idx:05d}' for idx in [16,16,16,4]
-                                 ]  # ! four views for inference
+                                #  ]  # ! four views for inference
                 # cur_all_fname += [f'{idx:05d}' for idx in range(40) if idx not in [0,12,30,36]] # ! four views for inference
             elif self.single_view_for_i23d:
                 # cur_all_fname = [f'{idx:05d}'

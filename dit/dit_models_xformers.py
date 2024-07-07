@@ -36,7 +36,7 @@ if torch.cuda.is_available():
     from xformers.components.activations import build_activation, Activation
     from xformers.components.feedforward import fused_mlp
 
-from ldm.modules.attention import MemoryEfficientCrossAttention, JointMemoryEfficientCrossAttention
+from ldm.modules.attention import MemoryEfficientCrossAttention
 
 
 def modulate(x, shift, scale):

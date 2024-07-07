@@ -745,10 +745,8 @@ class TrainLoop3DRec(TrainLoopBasic):
 
                 pred_vis = th.cat(
                     [
-                        # self.pool_128(micro['img']),
-                        self.pool_128(gen_img),
-                        # self.pool_128(pred_depth.repeat_interleave(3, dim=1))
-                        self.pool_128(pred_depth)
+                        gen_img,
+                        pred_depth
                     ],
                     dim=-1)  # B, 3, H, W
 
