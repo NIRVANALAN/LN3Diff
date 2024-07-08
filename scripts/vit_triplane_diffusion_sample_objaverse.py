@@ -45,6 +45,8 @@ from datasets.shapenet import load_eval_data
 from torch.utils.data import Subset
 from datasets.eg3d_dataset import init_dataset_kwargs
 
+from transport.train_utils import parse_transport_args
+
 SEED = 0
 
 
@@ -72,14 +74,14 @@ def main(args):
         **args_to_dict(args,
                        model_and_diffusion_defaults().keys()))
 
-    if 'cldm' in args.trainer_name:
-        assert isinstance(denoise_model, tuple)
-        denoise_model, controlNet = denoise_model
+    # if 'cldm' in args.trainer_name:
+    #     assert isinstance(denoise_model, tuple)
+    #     denoise_model, controlNet = denoise_model
 
-        controlNet.to(dist_util.dev())
-        controlNet.train()
-    else:
-        controlNet = None
+    #     controlNet.to(dist_util.dev())
+    #     controlNet.train()
+    # else:
+        # controlNet = None
 
     opts = eg3d_options_default()
     if args.sr_training:
@@ -103,14 +105,6 @@ def main(args):
         **args_to_dict(args,
                        encoder_and_nsr_defaults().keys()))
 
-    # logger.log("AE triplane decoder reuses G_ema decoder...")
-    # auto_encoder.decoder.register_buffer('w_avg', G_ema.backbone.mapping.w_avg)
-
-    # print(auto_encoder.decoder.w_avg.shape) # [512]
-
-    # auto_encoder.load_state_dict(
-    #     dist_util.load_state_dict(args.rec_model_path, map_location="cpu"))
-
     auto_encoder.to(dist_util.dev())
     auto_encoder.eval()
 
@@ -121,84 +115,30 @@ def main(args):
         from datasets.g_buffer_objaverse import load_data, load_eval_data, load_memory_data, load_wds_data
     else:  # shapenet
         from datasets.shapenet import load_data, load_eval_data, load_memory_data
+    
+    # load data if i23d
+    if args.i23d:
+        data = load_eval_data(
+            file_path=args.eval_data_dir,
+            batch_size=args.eval_batch_size,
+            reso=args.image_size,
+            reso_encoder=args.image_size_encoder,  # 224 -> 128
+            num_workers=args.num_workers,
+            load_depth=True,  # for evaluation
+            preprocess=auto_encoder.preprocess,
+            **args_to_dict(args,
+                            dataset_defaults().keys()))
+    else:
+        data = None # t23d sampling, only caption required
 
-    # if args.cfg in ('afhq', 'ffhq'):
-    #     # ! load data
-    #     logger.log("creating eg3d data loader...")
-    #     training_set_kwargs, dataset_name = init_dataset_kwargs(
-    #         data=args.data_dir,
-    #         class_name='datasets.eg3d_dataset.ImageFolderDataset'
-    #     )  # only load pose here
-    #     # if args.cond and not training_set_kwargs.use_labels:
-    #     # raise Exception('check here')
-
-    #     # training_set_kwargs.use_labels = args.cond
-    #     training_set_kwargs.use_labels = True
-    #     training_set_kwargs.xflip = True
-    #     training_set_kwargs.random_seed = SEED
-    #     # desc = f'{args.cfg:s}-{dataset_name:s}-gpus{c.num_gpus:d}-batch{c.batch_size:d}-gamma{c.loss_kwargs.r1_gamma:g}'
-
-    #     # * construct ffhq/afhq dataset
-    #     training_set = dnnlib.util.construct_class_by_name(
-    #         **training_set_kwargs)  # subclass of training.dataset.Dataset
-
-    #     training_set = dnnlib.util.construct_class_by_name(
-    #         **training_set_kwargs)  # subclass of training.dataset.Dataset
-
-    #     # training_set_sampler = InfiniteSampler(
-    #     #     dataset=training_set,
-    #     #     rank=dist_util.get_rank(),
-    #     #     num_replicas=dist_util.get_world_size(),
-    #     #     seed=SEED)
-
-    #     # data = iter(
-    #     #     th.utils.data.DataLoader(dataset=training_set,
-    #     #                             sampler=training_set_sampler,
-    #     #                             batch_size=args.batch_size,
-    #     #                             pin_memory=True,
-    #     #                             num_workers=args.num_workers,))
-    #     #                             #  prefetch_factor=2))
-
-    #     eval_data = th.utils.data.DataLoader(dataset=Subset(
-    #         training_set, np.arange(25)),
-    #                                          batch_size=args.eval_batch_size,
-    #                                          num_workers=1)
-
-    # else:
-
-        # logger.log("creating data loader...")
-
-        # if args.use_wds:
-        #     if args.eval_data_dir == 'NONE':
-        #         with open(args.eval_shards_lst) as f:
-        #             eval_shards_lst = [url.strip() for url in f.readlines()]
-        #     else:
-        #         eval_shards_lst = args.eval_data_dir  # auto expanded
-
-        #     eval_data = load_wds_data(
-        #         eval_shards_lst, args.image_size, args.image_size_encoder,
-        #         args.eval_batch_size, args.num_workers,
-        #         **args_to_dict(args,
-        #                        dataset_defaults().keys()))
-
-        # else:
-        #     eval_data = load_eval_data(
-        #         file_path=args.eval_data_dir,
-        #         batch_size=args.eval_batch_size,
-        #         reso=args.image_size,
-        #         reso_encoder=args.image_size_encoder,  # 224 -> 128
-        #         num_workers=args.num_workers,
-        #         # load_depth=True,  # for evaluation
-        #         **args_to_dict(args,
-        #                        dataset_defaults().keys()))
 
     TrainLoop = {
-        # 'adm': nsr.TrainLoop3DDiffusion,
-        # 'vpsde_ldm': nsr.lsgm.TrainLoop3D_LDM,
-        # 'dit': nsr.TrainLoop3DDiffusionDiT,
-        # lsgm
         'vpsde_crossattn': nsr.lsgm.TrainLoop3DDiffusionLSGM_crossattn,
         'vpsde_crossattn_objv': nsr.crossattn_cldm_objv.TrainLoop3DDiffusionLSGM_crossattn, # for api compat
+        'sgm_legacy':
+        nsr.lsgm.sgm_DiffusionEngine.DiffusionEngineLSGM,
+        'flow_matching':
+        nsr.lsgm.flow_matching_trainer.FlowMatchingEngine,
     }[args.trainer_name]
 
     # continuous
@@ -216,21 +156,16 @@ def main(args):
 
     training_loop_class = TrainLoop(rec_model=auto_encoder,
                                     denoise_model=denoise_model,
-                                    control_model=controlNet,
+                                    control_model=None, # to remove
                                     diffusion=diffusion,
                                     sde_diffusion=sde_diffusion,
                                     loss_class=None,
-                                    data=None,
-                                    # eval_data=eval_data,
+                                    data=data,
                                     eval_data=None,
                                     **vars(args))
 
     logger.log("sampling...")
     dist_util.synchronize()
-
-    # all_images = []
-    # all_labels = []
-    # while len(all_images) * args.batch_size < args.num_samples:
 
     if dist_util.get_rank() == 0:
 
@@ -243,11 +178,16 @@ def main(args):
         # ! use pre-saved camera pose form g-buffer objaverse
         camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[:]
 
-        if args.create_controlnet or 'crossattn' in args.trainer_name:
-            training_loop_class.eval_cldm(
+        # ! debug cfg
+
+        # for unconditional_guidance_scale in [1,2,3,4,5,6,6.5,7]:
+        # for unconditional_guidance_scale in [4,5,6,7,8,9,10]:
+
+        training_loop_class.eval_cldm(
                 prompt=args.prompt,
-                unconditional_guidance_scale=args.
-                unconditional_guidance_scale,
+                # unconditional_guidance_scale=args.
+                # unconditional_guidance_scale,
+                unconditional_guidance_scale=unconditional_guidance_scale,
                 use_ddim=args.use_ddim,
                 save_img=args.save_img,
                 use_train_trajectory=args.use_train_trajectory,
@@ -255,18 +195,8 @@ def main(args):
                 num_instances=args.num_instances,
                 num_samples=args.num_samples,
                 export_mesh=args.export_mesh, 
-                # training_loop_class.rec_model,
-                # training_loop_class.ddpm_model
             )
-        else:
-            # evaluate ldm
-            training_loop_class.eval_ddpm_sample(
-                training_loop_class.rec_model,
-                save_img=args.save_img,
-                use_train_trajectory=args.use_train_trajectory,
-                export_mesh=args.export_mesh, 
-                # training_loop_class.ddpm_model
-            )
+
 
     dist.barrier()
     logger.log("sampling complete")
@@ -331,6 +261,7 @@ def create_argparser():
         use_eos_feature=False,
         export_mesh=False,
         cond_key='caption',
+        allow_tf32=True,
     )
 
     defaults.update(model_and_diffusion_defaults())
@@ -342,6 +273,8 @@ def create_argparser():
 
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
+
+    parse_transport_args(parser)
 
     return parser
 

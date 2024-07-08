@@ -10,8 +10,12 @@ from .respace import SpacedDiffusion, space_timesteps
 # from .unet_old import SuperResModel, UNetModel, EncoderUNetModel # , UNetModelWithHint
 from .unet import SuperResModel, UNetModel, EncoderUNetModel # , UNetModelWithHint
 import torch as th
-from dit.dit_models_xformers import DiT_models
-from dit.dit_models_xformers import TextCondDiTBlock
+# from dit.dit_models_xformers import DiT_models
+# from dit.dit_models_xformers import TextCondDiTBlock
+from dit.dit_models_xformers import TextCondDiTBlock, ImageCondDiTBlock, FinalLayer
+from dit.dit_trilatent import DiT_models as DiT_models_t23d
+from dit.dit_i23d import DiT_models as DiT_models_i23d
+
 if th.cuda.is_available():
     from xformers.triton import FusedLayerNorm as LayerNorm
 
@@ -117,12 +121,14 @@ def model_and_diffusion_defaults():
         # ! controlnet args
         create_controlnet=False,
         create_dit=False,
+        i23d=False,
         create_unet_with_hint=False,
         dit_model_arch='DiT-L/2',
         # ! ldm unet support
         use_spatial_transformer=False,  # custom transformer support
         transformer_depth=1,  # custom transformer support
         context_dim=-1,  # custom transformer support
+        pooling_ctx_dim=768,  # custom transformer support
         roll_out=False,  # whether concat in batch, not channel
         n_embed=
         None,  # custom support for prediction of discrete ids into codebook of first stage vq model
@@ -180,10 +186,12 @@ def create_model_and_diffusion(
     use_spatial_transformer,
     transformer_depth,
     context_dim,
+    pooling_ctx_dim,
     n_embed,
     legacy,
     mixing_logit_init,
     create_dit,
+    i23d,
     create_unet_with_hint,
     dit_model_arch,
     roll_out,
@@ -217,10 +225,12 @@ def create_model_and_diffusion(
         use_spatial_transformer=use_spatial_transformer,
         transformer_depth=transformer_depth,
         context_dim=context_dim,
+        pooling_ctx_dim=pooling_ctx_dim,
         n_embed=n_embed,
         legacy=legacy,
         mixing_logit_init=mixing_logit_init,
         create_dit=create_dit,
+        i23d=i23d,
         create_unet_with_hint=create_unet_with_hint,
         dit_model_arch=dit_model_arch,
         roll_out=roll_out,
@@ -265,12 +275,14 @@ def create_model(
     mixed_prediction=False,
     create_controlnet=False,
     create_dit=False,
+    i23d=False,
     create_unet_with_hint=False,
     dit_model_arch='DiT-L/2',
     hint_channels=3,
     use_spatial_transformer=False,  # custom transformer support
     transformer_depth=1,  # custom transformer support
     context_dim=None,  # custom transformer support
+    pooling_ctx_dim=-1,
     n_embed=None,  # custom support for prediction of discrete ids into codebook of first stage vq model
     legacy=True,
     mixing_logit_init=-6,
@@ -337,6 +349,7 @@ def create_model(
             use_spatial_transformer=use_spatial_transformer,
             transformer_depth=transformer_depth,
             context_dim=context_dim,
+            pooling_ctx_dim=pooling_ctx_dim,
             n_embed=n_embed,
             legacy=legacy,
             mixing_logit_init=mixing_logit_init,
@@ -372,14 +385,35 @@ def create_model(
         return controlledUnetModel, controlNet
 
     elif create_dit:
-        return DiT_models[dit_model_arch](
-            input_size=image_size,
-            num_classes=0,
-            learn_sigma=learn_sigma,
-            in_channels=denoise_in_channels,
-            context_dim=context_dim,  # add CLIP text embedding
-            roll_out=roll_out, 
-            vit_blk=TextCondDiTBlock)
+        # return DiT_models[dit_model_arch](
+        #     input_size=image_size,
+        #     num_classes=0,
+        #     learn_sigma=learn_sigma,
+        #     in_channels=denoise_in_channels,
+        #     context_dim=context_dim,  # add CLIP text embedding
+        #     roll_out=roll_out, 
+        #     vit_blk=TextCondDiTBlock)
+
+        if i23d:
+            return DiT_models_i23d[dit_model_arch](
+                input_size=image_size,
+                num_classes=0,
+                learn_sigma=learn_sigma,
+                in_channels=denoise_in_channels,
+                context_dim=context_dim,  # add CLIP text embedding
+                roll_out=roll_out, 
+                vit_blk=ImageCondDiTBlock, 
+                pooling_ctx_dim=pooling_ctx_dim,)
+        else: # t23d
+            return DiT_models_t23d[dit_model_arch](
+                input_size=image_size,
+                num_classes=0,
+                learn_sigma=learn_sigma,
+                in_channels=denoise_in_channels,
+                context_dim=context_dim,  # add CLIP text embedding
+                roll_out=roll_out, 
+                vit_blk=TextCondDiTBlock)
+
     else:
 
         # if create_unet_with_hint:

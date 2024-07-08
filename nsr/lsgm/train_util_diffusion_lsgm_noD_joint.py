@@ -240,7 +240,8 @@ class TrainLoop3DDiffusionLSGMJointnoD(SDETrainLoopJoint):
                          diffusion_input_size=diffusion_input_size,
                          **kwargs)
 
-        sde_diffusion.args.batch_size = batch_size
+        if sde_diffusion is not None:
+            sde_diffusion.args.batch_size = batch_size
         self.latent_name = 'latent_normalized_2Ddiffusion'  # normalized triplane latent
         self.render_latent_behaviour = 'decode_after_vae'  # directly render using triplane operations
         self.diffusion_ce_anneal = diffusion_ce_anneal

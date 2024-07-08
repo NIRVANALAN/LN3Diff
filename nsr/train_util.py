@@ -112,6 +112,11 @@ class TrainLoopBasic:
         # self._load_and_sync_parameters(load_submodule_name)
         self._load_and_sync_parameters()
 
+        self.dtype = th.float32 # tf32 by default
+
+        if use_amp: 
+            self.dtype = th.bfloat16
+
         self.mp_trainer_rec = MixedPrecisionTrainer(
             model=self.rec_model,
             use_fp16=self.use_fp16,

@@ -13,8 +13,6 @@ from apex.normalization import FusedLayerNorm as LayerNorm
 from apex.normalization import FusedRMSNorm as RMSNorm
 from timm.models.vision_transformer import Mlp
 
-from vit.vit_triplane import XYZPosEmbed
-
 
 class DiT_I23D(DiT):
     # DiT with 3D_aware operations
@@ -33,6 +31,7 @@ class DiT_I23D(DiT):
         mixing_logit_init=-3,
         mixed_prediction=True,
         context_dim=False,
+        pooling_ctx_dim=768,
         roll_out=False,
         vit_blk=ImageCondDiTBlock,
         final_layer_blk=T2IFinalLayer,
@@ -49,9 +48,8 @@ class DiT_I23D(DiT):
         # self.dino_proj = CaptionEmbedder(context_dim,
         self.clip_ctx_dim = 1024 # vit-l
         # self.dino_proj = CaptionEmbedder(self.clip_ctx_dim, # ! dino-vitl/14 here, for img-cond
-        self.dino_proj = CaptionEmbedder(768, # ! dino-vitb/14 here, for MV-cond. hard coded for now...
-        # self.dino_proj = CaptionEmbedder(1024, # ! dino-vitb/14 here, for MV-cond. hard coded for now...
-                                                hidden_size,
+        # self.dino_proj = CaptionEmbedder(768, # ! dino-vitb/14 here, for MV-cond. hard coded for now...
+        self.dino_proj = CaptionEmbedder(1024, hidden_size,
                                                 act_layer=approx_gelu)
 
         self.clip_spatial_proj = CaptionEmbedder(1024, # clip_I-L
@@ -178,6 +176,7 @@ class DiT_I23D_PixelArt(DiT_I23D):
         mixing_logit_init=-3,
         mixed_prediction=True,
         context_dim=False,
+        pooling_ctx_dim=768,
         roll_out=False,
         vit_blk=ImageCondDiTBlockPixelArt,
         final_layer_blk=FinalLayer,
@@ -186,22 +185,24 @@ class DiT_I23D_PixelArt(DiT_I23D):
                          depth, num_heads, mlp_ratio, class_dropout_prob,
                          num_classes, learn_sigma, mixing_logit_init,
                         #  mixed_prediction, context_dim, roll_out, ImageCondDiTBlockPixelArt,
-                         mixed_prediction, context_dim, roll_out, ImageCondDiTBlockPixelArtRMSNorm,
+                         mixed_prediction, 
+                         context_dim, 
+                         pooling_ctx_dim,
+                         roll_out, 
+                         ImageCondDiTBlockPixelArtRMSNorm,
                          final_layer_blk)
 
-        # ! a shared one
+        # ! single adaLN-zero
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(), nn.Linear(hidden_size, 6 * hidden_size, bias=True))
-
-        # ! single
         nn.init.constant_(self.adaLN_modulation[-1].weight, 0)
         nn.init.constant_(self.adaLN_modulation[-1].bias, 0)
 
         del self.clip_text_proj
         self.cap_embedder = nn.Sequential( # TODO, init with zero here.
-            LayerNorm(context_dim),
+            LayerNorm(pooling_ctx_dim), # for pooled [cls] token transformation.
             nn.Linear(
-                context_dim,
+                pooling_ctx_dim,
                 hidden_size,
             ),
         )

@@ -410,6 +410,7 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
         camera=None,
         num_samples=1,
         num_instances=1,
+        export_mesh=False, # TODO
     ):
         # ! slightly modified for new API. combined with
         # /cpfs01/shared/V2V/V2V_hdd/yslan/Repo/generative-models/sgm/models/diffusion.py:249 log_images()

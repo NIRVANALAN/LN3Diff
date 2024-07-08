@@ -248,7 +248,6 @@ class Sampler:
     def __init__(
         self,
         transport,
-        guider_config=None,
     ):
         """Constructor for a general sampler; supporting different sampling methods
         Args:
@@ -259,15 +258,6 @@ class Sampler:
         self.drift = self.transport.get_drift()
         self.score = self.transport.get_score()
 
-        # assert guider_config is not None
-        # self.guider = instantiate_from_config(
-        #     # default(
-        #     guider_config,
-        #         # DEFAULT_GUIDER,
-        #     # )
-        # )
-
-    
     def __get_sde_diffusion_and_drift(
         self,
         *,

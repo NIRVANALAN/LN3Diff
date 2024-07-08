@@ -172,46 +172,7 @@ class TrainLoopDiffusionWithRec(TrainLoop):
 
         planes *= self.triplane_scaling_divider  # if setting clip_denoised=True, the sampled planes will lie in [-1,1]. Thus, values beyond [+- std] will be abandoned in this version. Move to IN for later experiments.
 
-        # sr_w_code = getattr(self.ddp_rec_model.module.decoder, 'w_avg', None)
-        # sr_w_code = None
         batch_size = planes.shape[0]
-
-
-
-        # ! ffhq visualization
-        # cam_radius =  2.7
-        # cam_pivot = th.tensor([0,0,0.2], device=dist_util.dev())
-        # fov_deg = 18.837  # ! fixed for FFHQ
-
-        # device = dist_util.dev()
-        # intrinsics = FOV_to_intrinsics(fov_deg, device=dist_util.dev())
-        # all_camera = []
-
-        # angle_p = -0.2
-        # for pose_idx, (angle_y, angle_p) in enumerate(
-        #         zip(np.linspace(-1.57/2, 1.57*3/2, 72), [-0.2] * 36)):
-
-        #     cam2world_pose = LookAtPoseSampler.sample(
-        #         np.pi / 2 + angle_y,
-        #         np.pi / 2 + angle_p,
-        #         cam_pivot,
-        #         radius=cam_radius,
-        #         device=device)
-        #     camera_params = th.cat(
-        #         [cam2world_pose.reshape(-1, 16),
-        #          intrinsics.reshape(-1, 9)],
-        #         1)
-        #     all_camera.append(camera_params)
-        # all_camera = th.cat(all_camera, 0)
-        # st() # th.save(all_camera, 'assets/ffhq_eval_pose.pt')
-
-
-        # if sr_w_code is not None:
-        #     sr_w_code = sr_w_code.reshape(1, 1,
-        #                                   -1).repeat_interleave(batch_size, 0)
-
-        # used during diffusion sampling inference
-        # if not save_img:
 
         # ! mesh
 
@@ -231,10 +192,7 @@ class TrainLoopDiffusionWithRec(TrainLoop):
 
         if export_mesh:
             # if True:
-            # mesh_size = 512
-            mesh_size = 256 # avoid OOM on V100
-            # mesh_size = 384 # only available on A100, otherwise OOM
-            # mesh_size = 320
+            mesh_size = 192 # avoid OOM on V100
             mesh_thres = 10  # TODO, requires tuning
             import mcubes
             import trimesh
@@ -291,20 +249,12 @@ class TrainLoopDiffusionWithRec(TrainLoop):
             rec_model(latent=ddpm_latent,
                       behaviour='decode_after_vae_no_render'))
 
-        # planes = planes.repeat_interleave(micro['c'].shape[0], 0)
-
-        # for i in range(0, len(c_list), 1): # TODO, larger batch size for eval
-        # micro_batchsize = 2
-        # micro_batchsize = batch_size
-
         if render_reference is None:
             render_reference = self.eval_data  # compat
         else:  # use train_traj
             for key in ['ins', 'bbox', 'caption']:
                 if key in render_reference:
                     render_reference.pop(key)
-            # render_reference.pop('bbox')
-            # render_reference.pop('caption')
 
             # compat lst for enumerate
             if render_all: # render 50 or 250 views, for shapenet
@@ -331,17 +281,8 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                 img=None,
                 c=micro['c'],
                 latent=ddpm_latent,
-                # latent={
-                #     # k: v.repeat_interleave(micro['c'].shape[0], 0) if v is not None else None
-                #     k: v.repeat_interleave(micro['c'].shape[0], 0) if v is not None else None
-                #     for k, v in ddpm_latent.items()
-                # },
                 behaviour='triplane_dec')
 
-            # if True:
-            # pred_depth = pred['image_depth']
-            # pred_depth = (pred_depth - pred_depth.min()) / (pred_depth.max() -
-            #                                                 pred_depth.min())
 
             pred_depth = pred['image_depth']
             pred_depth = (pred_depth - pred_depth.min()) / (pred_depth.max() -
@@ -381,10 +322,8 @@ class TrainLoopDiffusionWithRec(TrainLoop):
 
                 pred_vis = th.cat(
                     [
-                        # self.pool_128(micro['img']),
-                        self.pool_128(gen_img),
-                        # self.pool_128(pred_depth.repeat_interleave(3, dim=1))
-                        self.pool_128(pred_depth)
+                        gen_img,
+                        pred_depth
                     ],
                     dim=-1)  # B, 3, H, W
 
@@ -405,10 +344,6 @@ class TrainLoopDiffusionWithRec(TrainLoop):
             vis = pred_vis.permute(0, 2, 3, 1).cpu().numpy()
             vis = vis * 127.5 + 127.5
             vis = vis.clip(0, 255).astype(np.uint8)
-
-            # if vis.shape[0] > 1:
-            #     vis = np.concatenate(np.split(vis, vis.shape[0], axis=0),
-            #                          axis=-3)
 
             # if not save_img:
             for j in range(vis.shape[0]

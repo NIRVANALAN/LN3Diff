@@ -60,6 +60,15 @@ class TrainLoop:
         self.pool_64 = th.nn.AdaptiveAvgPool2d((64, 64))
 
         self.use_amp = use_amp
+
+        if use_amp:
+            if th.backends.cuda.matmul.allow_tf32: # a100
+                self.dtype = th.bfloat16
+            else:
+                self.dtype = th.float16
+        else:
+            self.dtype = th.float32
+
         self.model_name = model_name
         self.model = model
         self.diffusion = diffusion

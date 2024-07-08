@@ -733,24 +733,10 @@ class MultiViewObjverseDataset(Dataset):
             # ][:27])
 
             if self.four_view_for_latent:
-                # cur_all_fname = [t.split('.')[0] for t in os.listdir(ins)
-                #                  ]  # use full set for training
-                # cur_all_fname = [f'{idx:05d}' for idx in [0, 12, 30, 36]
-                # cur_all_fname = [f'{idx:05d}' for idx in [6,12,18,24]
-                # cur_all_fname = [f'{idx:05d}' for idx in [7,16,24,25]
-
-                # cur_all_fname = [f'{idx:05d}' for idx in [4,12,20,25]
-
                 # ! v=6 version infer latent
                 cur_all_fname = [f'{idx:05d}' for idx in [25,0,9,18,27,33]]
 
-                # cur_all_fname = [f'{idx:05d}' for idx in [4,4,4,4]
-                # cur_all_fname = [f'{idx:05d}' for idx in [16,16,16,4]
-                                #  ]  # ! four views for inference
-                # cur_all_fname += [f'{idx:05d}' for idx in range(40) if idx not in [0,12,30,36]] # ! four views for inference
             elif self.single_view_for_i23d:
-                # cur_all_fname = [f'{idx:05d}'
-                #                  for idx in [16]]  # 20 is also fine
                 cur_all_fname = [f'{idx:05d}'
                                  for idx in [2]]  # ! furniture side view
 
@@ -1125,69 +1111,69 @@ class RealDataset(Dataset):
                                      (0.5, 0.5, 0.5)))  # type: ignore
 
         self.normalize = transforms.Compose(transformations)
-        camera = torch.load('eval_pose.pt', map_location='cpu')
-        self.eval_camera = camera
+        # camera = torch.load('eval_pose.pt', map_location='cpu')
+        # self.eval_camera = camera
 
         # pre-cache
-        self.calc_rays_plucker()
+        # self.calc_rays_plucker()
 
-    def gen_rays(self, c):
-        # Generate rays
-        intrinsics, c2w = c[16:], c[:16].reshape(4, 4)
-        self.h = self.reso_encoder
-        self.w = self.reso_encoder
-        yy, xx = torch.meshgrid(
-            torch.arange(self.h, dtype=torch.float32) + 0.5,
-            torch.arange(self.w, dtype=torch.float32) + 0.5,
-            indexing='ij')
+    # def gen_rays(self, c):
+    #     # Generate rays
+    #     intrinsics, c2w = c[16:], c[:16].reshape(4, 4)
+    #     self.h = self.reso_encoder
+    #     self.w = self.reso_encoder
+    #     yy, xx = torch.meshgrid(
+    #         torch.arange(self.h, dtype=torch.float32) + 0.5,
+    #         torch.arange(self.w, dtype=torch.float32) + 0.5,
+    #         indexing='ij')
 
-        # normalize to 0-1 pixel range
-        yy = yy / self.h
-        xx = xx / self.w
+    #     # normalize to 0-1 pixel range
+    #     yy = yy / self.h
+    #     xx = xx / self.w
 
-        # K = np.array([f_x, 0, w / 2, 0, f_y, h / 2, 0, 0, 1]).reshape(3, 3)
-        cx, cy, fx, fy = intrinsics[2], intrinsics[5], intrinsics[
-            0], intrinsics[4]
-        # cx *= self.w
-        # cy *= self.h
+    #     # K = np.array([f_x, 0, w / 2, 0, f_y, h / 2, 0, 0, 1]).reshape(3, 3)
+    #     cx, cy, fx, fy = intrinsics[2], intrinsics[5], intrinsics[
+    #         0], intrinsics[4]
+    #     # cx *= self.w
+    #     # cy *= self.h
 
-        # f_x = f_y = fx * h / res_raw
-        if not isinstance(c2w, torch.Tensor):
-            c2w = torch.from_numpy(c2w)
+    #     # f_x = f_y = fx * h / res_raw
+    #     if not isinstance(c2w, torch.Tensor):
+    #         c2w = torch.from_numpy(c2w)
 
-        c2w = c2w.float()
+    #     c2w = c2w.float()
 
-        xx = (xx - cx) / fx
-        yy = (yy - cy) / fy
-        zz = torch.ones_like(xx)
-        dirs = torch.stack((xx, yy, zz), dim=-1)  # OpenCV convention
-        dirs /= torch.norm(dirs, dim=-1, keepdim=True)
-        dirs = dirs.reshape(-1, 3, 1)
-        del xx, yy, zz
-        # st()
-        dirs = (c2w[None, :3, :3] @ dirs)[..., 0]
+    #     xx = (xx - cx) / fx
+    #     yy = (yy - cy) / fy
+    #     zz = torch.ones_like(xx)
+    #     dirs = torch.stack((xx, yy, zz), dim=-1)  # OpenCV convention
+    #     dirs /= torch.norm(dirs, dim=-1, keepdim=True)
+    #     dirs = dirs.reshape(-1, 3, 1)
+    #     del xx, yy, zz
+    #     # st()
+    #     dirs = (c2w[None, :3, :3] @ dirs)[..., 0]
 
-        origins = c2w[None, :3, 3].expand(self.h * self.w, -1).contiguous()
-        origins = origins.view(self.h, self.w, 3)
-        dirs = dirs.view(self.h, self.w, 3)
+    #     origins = c2w[None, :3, 3].expand(self.h * self.w, -1).contiguous()
+    #     origins = origins.view(self.h, self.w, 3)
+    #     dirs = dirs.view(self.h, self.w, 3)
 
-        return origins, dirs
+    #     return origins, dirs
 
-    def calc_rays_plucker(self):
-        all_rays_plucker = []
+    # def calc_rays_plucker(self):
+    #     all_rays_plucker = []
 
-        for c2w in self.eval_camera:
-            rays_o, rays_d = self.gen_rays(c2w)
-            rays_plucker = torch.cat(
-                [torch.cross(rays_o, rays_d, dim=-1), rays_d],
-                dim=-1)  # [h, w, 6]
-            all_rays_plucker.append(rays_plucker)
+    #     for c2w in self.eval_camera:
+    #         rays_o, rays_d = self.gen_rays(c2w)
+    #         rays_plucker = torch.cat(
+    #             [torch.cross(rays_o, rays_d, dim=-1), rays_d],
+    #             dim=-1)  # [h, w, 6]
+    #         all_rays_plucker.append(rays_plucker)
 
-        self.all_rays_plucker = torch.stack(all_rays_plucker,
-                                            0).permute(0, 3, 1, 2)  # B 6 H W
+    #     self.all_rays_plucker = torch.stack(all_rays_plucker,
+    #                                         0).permute(0, 3, 1, 2)  # B 6 H W
 
-        # st()
-        pass
+    #     # st()
+    #     pass
 
     def __len__(self):
         return len(self.rgb_list)
@@ -1208,17 +1194,17 @@ class RealDataset(Dataset):
                 1 - alpha_mask) * bg_white  #[3, reso_encoder, reso_encoder]
             raw_img = raw_img.astype(np.uint8)
 
-        img_to_encoder = cv2.resize(raw_img,
-                                    (self.reso_encoder, self.reso_encoder),
-                                    interpolation=cv2.INTER_LANCZOS4)
+        # img_to_encoder = cv2.resize(raw_img,
+        #                             (self.reso_encoder, self.reso_encoder),
+        #                             interpolation=cv2.INTER_LANCZOS4)
 
         # img_to_encoder = img_to_encoder
-        img_to_encoder = self.normalize(img_to_encoder)
+        # img_to_encoder = self.normalize(img_to_encoder)
 
         # ! concat plucker
-        img_to_encoder = torch.cat(
-            [img_to_encoder, self.all_rays_plucker[index]],
-            0)  # concat in C dim
+        # img_to_encoder = torch.cat(
+        #     [img_to_encoder, self.all_rays_plucker[index]],
+        #     0)  # concat in C dim
 
         # log gt
         img = cv2.resize(raw_img, (self.reso, self.reso),
@@ -1230,13 +1216,13 @@ class RealDataset(Dataset):
 
         ret_dict = {
             # 'rgb_fname': rgb_fname,
-            'img_to_encoder':
-            img_to_encoder.unsqueeze(0).repeat_interleave(40, 0),
-            'img': img.unsqueeze(0).repeat_interleave(40, 0),
-            'c': self.eval_camera,  # TODO, get pre-calculated samples
-            'ins': 'placeholder',
-            'bbox': 'placeholder',
-            'caption': 'placeholder',
+            # 'img_to_encoder':
+            # img_to_encoder.unsqueeze(0).repeat_interleave(40, 0),
+            'img': img,
+            # 'c': self.eval_camera,  # TODO, get pre-calculated samples
+            # 'ins': 'placeholder',
+            # 'bbox': 'placeholder',
+            # 'caption': 'placeholder',
         }
 
         # ! repeat as a intance

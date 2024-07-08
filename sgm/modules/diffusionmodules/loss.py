@@ -8,6 +8,43 @@ from ...modules.encoders.modules import GeneralConditioner
 from ...util import append_dims, instantiate_from_config
 from .denoiser import Denoiser
 
+from transport import create_transport, Sampler
+from pdb import set_trace as st
+
+class FMLoss(nn.Module):
+    def __init__(self, transport_config):
+        super().__init__()
+        self.transport = instantiate_from_config(transport_config)
+
+    def _forward(
+        self,
+        network: nn.Module,
+        cond: Dict,
+        input: torch.Tensor,
+        batch: Dict,
+    ) -> Tuple[torch.Tensor, Dict]:
+        # additional_model_inputs = {
+        #     key: batch[key] for key in self.batch2model_keys.intersection(batch)
+        # }
+        model_kwargs = dict(context=cond)
+
+        loss_dict = self.transport.training_losses(network, input, model_kwargs)
+        # st() # check transport and model_kwargs whether OK
+        loss = loss_dict["loss"].mean()
+        return loss, loss_dict
+
+    
+    def forward(
+        self,
+        network: nn.Module,
+        # denoiser: Denoiser,
+        conditioner: GeneralConditioner,
+        input: torch.Tensor,
+        batch: Dict,
+    ) -> torch.Tensor:
+        cond = conditioner(batch)
+        return self._forward(network, cond, input, batch)
+
 
 class StandardDiffusionLoss(nn.Module):
     def __init__(

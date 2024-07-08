@@ -24,12 +24,23 @@ ldm_configs:
     params:
       emb_models:
         - is_trainable: False
-          input_key: caption
+          input_key: 'img'
           ucg_rate: 0.1
-          legacy_ucg_value: ""
-          target: sgm.modules.encoders.modules.FrozenCLIPEmbedder
+          # legacy_ucg_value: None
+          target: sgm.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
           params:
-            always_return_pooled: True
+              arch: 'ViT-L-14'
+              version: 'openai'
+              # version: 'laion2b_s32b_b82k'
+              freeze: True
+              output_tokens: True
+        - is_trainable: False
+          input_key: 'img'
+          ucg_rate: 0.1
+          # legacy_ucg_value: None
+          target: sgm.modules.encoders.modules.FrozenDinov2ImageEmbedder
+          params:
+              freeze: True
 
   loss_fn_config:
     target: sgm.modules.diffusionmodules.loss.StandardDiffusionLoss
@@ -47,8 +58,8 @@ ldm_configs:
   sampler_config:
     target: sgm.modules.diffusionmodules.sampling.EulerEDMSampler
     params:
-      num_steps: 250
-      # num_steps: 50
+      # num_steps: 250
+      num_steps: 50
 
       discretization_config:
         target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization

@@ -429,8 +429,6 @@ class ImageCondDiTBlock(DiTBlock):
         self.cross_attn = MemoryEfficientCrossAttention(
             query_dim=hidden_size,
             context_dim=context_dim, # ! mv-cond
-            # context_dim=1280,  # clip vit-G, adopted by SVD.
-            # context_dim=1024,  # clip vit-L
             heads=num_heads,
             enable_rmsnorm=enable_rmsnorm, 
             qk_norm=qk_norm)
@@ -666,29 +664,10 @@ class DiT(nn.Module):
                     mlp_ratio=mlp_ratio,
                     context_dim=context_dim) for _ in range(depth)
         ])
-        # else:
-        #     self.blocks = nn.ModuleList([
-        #         DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) if idx % 2 == 0 else
-        #         DiTBlockRollOut(hidden_size, num_heads, mlp_ratio=mlp_ratio)
-        #         for idx in range(depth)
-        #     ])
 
         self.final_layer = final_layer_blk(hidden_size, patch_size,
                                            self.out_channels)
         self.initialize_weights()
-
-        # self.mixed_prediction = mixed_prediction  # This enables mixed prediction
-        # if self.mixed_prediction:
-        #     if self.roll_out:
-        #         logit_ch = in_channels * 3
-        #     else:
-        #         logit_ch = in_channels
-        #     init = mixing_logit_init * torch.ones(
-        #         size=[1, logit_ch, 1, 1])  # hard coded for now
-        #     self.mixing_logit = torch.nn.Parameter(init, requires_grad=True)
-
-    # def len(self):
-    #     return len(self.blocks)
 
     def initialize_weights(self):
         # Initialize transformer layers:

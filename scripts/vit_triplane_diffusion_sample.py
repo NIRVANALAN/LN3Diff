@@ -394,6 +394,7 @@ def create_argparser():
         use_eos_feature=False,
         export_mesh=False,
         overwrite_diff_inp_size=None,
+        allow_tf32=True,
     )
 
     defaults.update(model_and_diffusion_defaults())

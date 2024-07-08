@@ -11,6 +11,7 @@ sys.path.append('.')
 import traceback
 
 import torch as th
+from xformers.triton import FusedLayerNorm as LayerNorm
 import torch.multiprocessing as mp
 import torch.distributed as dist
 import numpy as np
@@ -33,11 +34,11 @@ import nsr.lsgm
 # from nsr.train_util_diffusion import TrainLoop3DDiffusion as TrainLoop
 
 from datasets.eg3d_dataset import LMDBDataset_MV_Compressed_eg3d
-from nsr.script_util import create_3DAE_model, encoder_and_nsr_defaults, loss_defaults, rendering_options_defaults, eg3d_options_default
+from nsr.script_util import create_3DAE_model, encoder_and_nsr_defaults, loss_defaults, rendering_options_defaults, eg3d_options_default, dataset_defaults
 from datasets.shapenet import load_data, load_eval_data, load_memory_data
 from nsr.losses.builder import E3DGELossClass
 
-from utils.torch_utils import legacy, misc
+from torch_utils import legacy, misc
 from torch.utils.data import Subset
 from pdb import set_trace as st
 
@@ -45,7 +46,10 @@ from dnnlib.util import EasyDict, InfiniteSampler
 # from .vit_triplane_train_FFHQ import init_dataset_kwargs
 from datasets.eg3d_dataset import init_dataset_kwargs
 
-# from torch.utils.tensorboard import SummaryWriter
+th.backends.cudnn.enabled = True # https://zhuanlan.zhihu.com/p/635824460
+th.backends.cudnn.benchmark = True
+
+from transport.train_utils import parse_transport_args
 
 SEED = 0
 
@@ -53,8 +57,10 @@ SEED = 0
 def training_loop(args):
     # def training_loop(args):
     logger.log("dist setup...")
-    # th.autograd.set_detect_anomaly(False) # type: ignore
-    th.autograd.set_detect_anomaly(True) # type: ignore
+    # th.multiprocessing.set_start_method('spawn')
+    th.autograd.set_detect_anomaly(False) # type: ignore
+    # th.autograd.set_detect_anomaly(True)  # type: ignore
+    # st()
 
     th.cuda.set_device(
         args.local_rank)  # set this line to avoid extra memory on rank 0
@@ -69,6 +75,7 @@ def training_loop(args):
 
     th.backends.cuda.matmul.allow_tf32 = args.allow_tf32
     th.backends.cudnn.allow_tf32 = args.allow_tf32
+    # st()
 
     # logger.configure(dir=args.logdir, format_strs=["tensorboard", "csv"])
     logger.configure(dir=args.logdir)
@@ -95,8 +102,10 @@ def training_loop(args):
     # else:
     # args.image_size = args.diffusion_input_size
 
-    if args.pred_type == 'v': # for lsgm training
-        assert args.predict_v == True # for DDIM sampling
+    if args.pred_type == 'v':  # for lsgm training
+        assert args.predict_v == True  # for DDIM sampling
+    
+    # if not args.create_dit:
 
     denoise_model, diffusion = create_model_and_diffusion(
         **args_to_dict(args,
@@ -150,7 +159,6 @@ def training_loop(args):
             # for param in auto_encoder.decoder.triplane_decoder.decoder.parameters(): # type: ignore
             param.requires_grad_(False)
 
-
     if args.cfg in ('afhq', 'ffhq'):
 
         if args.sr_training:
@@ -175,9 +183,10 @@ def training_loop(args):
         else:
             logger.log("creating eg3d data loader...")
 
-            training_set_kwargs, dataset_name = init_dataset_kwargs(data=args.data_dir, 
-                                                                    class_name='datasets.eg3d_dataset.ImageFolderDataset',
-                                                                    reso_gt=args.image_size) # only load pose here
+            training_set_kwargs, dataset_name = init_dataset_kwargs(
+                data=args.data_dir,
+                class_name='datasets.eg3d_dataset.ImageFolderDataset',
+                reso_gt=args.image_size)  # only load pose here
             # if args.cond and not training_set_kwargs.use_labels:
             # raise Exception('check here')
 
@@ -205,8 +214,8 @@ def training_loop(args):
                 batch_size=args.batch_size,
                 pin_memory=True,
                 num_workers=args.num_workers,
-                persistent_workers=args.num_workers>0,
-                # prefetch_factor=max(8//args.batch_size, 2),
+                persistent_workers=args.num_workers > 0,
+                prefetch_factor=max(8 // args.batch_size, 2),
             ))
         #  prefetch_factor=2))
 
@@ -220,51 +229,99 @@ def training_loop(args):
         logger.log("creating data loader...")
 
         if args.objv_dataset:
-            from datasets.g_buffer_objaverse import load_data, load_eval_data, load_memory_data
-        else: # shapenet
+            from datasets.g_buffer_objaverse import load_data, load_eval_data, load_memory_data, load_wds_data, load_data_cls
+        else:  # shapenet
             from datasets.shapenet import load_data, load_eval_data, load_memory_data
-
 
         # TODO, load shapenet data
         # data = load_data(
         # st() mark
-        if args.overfitting:
-            logger.log("create overfitting memory dataset")
-            data = load_memory_data(
-                file_path=args.eval_data_dir,
-                batch_size=args.batch_size,
-                reso=args.image_size,
-                reso_encoder=args.image_size_encoder,  # 224 -> 128
-                num_workers=args.num_workers,
-                load_depth=True  # for evaluation
-            )
+        # if args.overfitting:
+        #     logger.log("create overfitting memory dataset")
+        #     data = load_memory_data(
+        #         file_path=args.eval_data_dir,
+        #         batch_size=args.batch_size,
+        #         reso=args.image_size,
+        #         reso_encoder=args.image_size_encoder,  # 224 -> 128
+        #         num_workers=args.num_workers,
+        #         load_depth=True  # for evaluation
+        #     )
+        # else:
+        if args.use_wds:
+            if args.data_dir == 'NONE':
+                with open(args.shards_lst) as f:
+                    shards_lst = [url.strip() for url in f.readlines()]
+                data = load_wds_data(
+                    shards_lst, args.image_size, args.image_size_encoder,
+                    args.batch_size, args.num_workers,
+                    **args_to_dict(args,
+                                   dataset_defaults().keys()))
+
+            else:
+                data = load_wds_data(
+                    args.data_dir, args.image_size, args.image_size_encoder,
+                    args.batch_size, args.num_workers,
+                    **args_to_dict(args,
+                                   dataset_defaults().keys()))
+
+                # eval_data = load_wds_data(
+                #     args.data_dir,
+                #     args.image_size,
+                #     args.image_size_encoder,
+                #     args.eval_batch_size,
+                #     args.num_workers,
+                #     decode_encode_img_only=args.decode_encode_img_only,
+                #     load_wds_diff=args.load_wds_diff)
+
+            if args.eval_data_dir == 'NONE':
+                with open(args.eval_shards_lst) as f:
+                    eval_shards_lst = [url.strip() for url in f.readlines()]
+            else:
+                eval_shards_lst = args.eval_data_dir  # auto expanded
+
+            eval_data = load_wds_data(
+                eval_shards_lst,
+                args.image_size,
+                args.image_size_encoder,
+                args.eval_batch_size,
+                args.num_workers,
+                plucker_embedding=args.plucker_embedding,
+                decode_encode_img_only=args.decode_encode_img_only,
+                mv_input=args.mv_input,
+                load_wds_diff=False,
+                load_instance=True)
+
         else:
             logger.log("create all instances dataset")
-            # st() mark
+
             data = load_data(
                 file_path=args.data_dir,
                 batch_size=args.batch_size,
                 reso=args.image_size,
                 reso_encoder=args.image_size_encoder,  # 224 -> 128
                 num_workers=args.num_workers,
-                load_depth=args.load_depth,
-                preprocess=auto_encoder.preprocess,  # clip
-                dataset_size=args.dataset_size,
-                use_lmdb=args.use_lmdb,
-                trainer_name=args.trainer_name,
+                load_latent=True,
+                **args_to_dict(args,
+                                dataset_defaults().keys())
+                # load_depth=args.load_depth,
+                # preprocess=auto_encoder.preprocess,  # clip
+                # dataset_size=args.dataset_size,
+                # use_lmdb=args.use_lmdb,
+                # trainer_name=args.trainer_name,
                 # load_depth=True # for evaluation
             )
+            eval_dataset = load_data_cls(
+                file_path=args.data_dir,
+                batch_size=args.batch_size,
+                reso=args.image_size,
+                reso_encoder=args.image_size_encoder,  # 224 -> 128
+                num_workers=args.num_workers,
+                load_latent=True,
+                return_dataset=True,
+                **args_to_dict(args,
+                                dataset_defaults().keys())
+            )
 
-        eval_data = load_eval_data(
-            file_path=args.eval_data_dir,
-            batch_size=args.eval_batch_size,
-            reso=args.image_size,
-            reso_encoder=args.image_size_encoder,  # 224 -> 128
-            num_workers=args.num_workers,
-            load_depth=True,  # for evaluation
-            interval=args.interval,
-            # use_lmdb=args.use_lmdb,
-        )
 
     # let all processes sync up before starting with a new epoch of training
 
@@ -281,15 +338,10 @@ def training_loop(args):
     logger.log("training...")
 
     TrainLoop = {
-        'adm': nsr.TrainLoop3DDiffusion,
-        # 'ssd_cvD': nsr.TrainLoop3DDiffusionSingleStagecvD,
-        'vpsde_lsgm_joint_noD': nsr.lsgm.TrainLoop3DDiffusionLSGMJointnoD,  # use vpsde
-        # control
-        # 'vpsde_cldm':nsr.lsgm.TrainLoop3DDiffusionLSGM_Control,
-        'vpsde_crossattn': nsr.lsgm.TrainLoop3DDiffusionLSGM_crossattn,
-        # 'vpsde_ldm': nsr.lsgm.TrainLoop3D_LDM,
-        'sgm_legacy':
-        nsr.lsgm.sgm_DiffusionEngine.DiffusionEngineLSGM,
+        'flow_matching':
+        nsr.lsgm.flow_matching_trainer.FlowMatchingEngine,
+        'flow_matching_gs':  
+        nsr.lsgm.flow_matching_trainer.FlowMatchingEngine_gs, # slightly modified sampling and rendering for gs
     }[args.trainer_name]
 
     if 'vpsde' in args.trainer_name:
@@ -297,11 +349,10 @@ def training_loop(args):
             dnnlib.EasyDict(
                 args_to_dict(args,
                              continuous_diffusion_defaults().keys())))
-        assert args.mixed_prediction, 'enable mixed_prediction by default'
+        # assert args.mixed_prediction, 'enable mixed_prediction by default'
         logger.log('create VPSDE diffusion.')
     else:
         sde_diffusion = None
-
 
     if 'cldm' in args.trainer_name:
         assert isinstance(denoise_model, tuple)
@@ -316,17 +367,19 @@ def training_loop(args):
     denoise_model.to(dist_util.dev())
     denoise_model.train()
 
+    auto_encoder.decoder.rendering_kwargs = args.rendering_kwargs
     TrainLoop(rec_model=auto_encoder,
-            denoise_model=denoise_model,
-            control_model=controlNet,
-            diffusion=diffusion,
-            sde_diffusion=sde_diffusion,
-            loss_class=loss_class,
-            data=data,
-            eval_data=eval_data,
-            **vars(args)).run_loop()
+              denoise_model=denoise_model,
+              control_model=controlNet,
+              diffusion=diffusion,
+              sde_diffusion=sde_diffusion,
+              loss_class=loss_class,
+              data=data,
+              eval_data=eval_dataset, # return dataset
+              **vars(args)).run_loop()
 
     dist_util.synchronize()
+
 
 def create_argparser(**kwargs):
     # defaults.update(model_and_diffusion_defaults())
@@ -336,6 +389,7 @@ def create_argparser(**kwargs):
         diffusion_input_size=-1,
         trainer_name='adm',
         use_amp=False,
+        train_vae=True,  # jldm?
         triplane_scaling_divider=1.0,  # divide by this value
         overfitting=False,
         num_workers=4,
@@ -360,7 +414,7 @@ def create_argparser(**kwargs):
         fp16_scale_growth=1e-3,
         data_dir="",
         eval_data_dir="",
-        load_depth=True, # TODO
+        load_depth=True,  # TODO
         logdir="/mnt/lustre/yslan/logs/nips23/",
         load_submodule_name='',  # for loading pretrained auto_encoder model
         ignore_resume_opt=False,
@@ -371,18 +425,23 @@ def create_argparser(**kwargs):
         interval=1,
         freeze_triplane_decoder=False,
         objv_dataset=False,
-        cond_key='img_sr',
+        use_eos_feature=False,
+        clip_grad_throld=1.0,
         allow_tf32=True,
     )
 
     defaults.update(model_and_diffusion_defaults())
     defaults.update(continuous_diffusion_defaults())
     defaults.update(encoder_and_nsr_defaults())  # type: ignore
+    defaults.update(dataset_defaults())  # type: ignore
     defaults.update(loss_defaults())
     defaults.update(control_net_defaults())
 
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
+
+    # ! add transport args
+    parse_transport_args(parser)
 
     return parser
 
@@ -390,6 +449,7 @@ def create_argparser(**kwargs):
 if __name__ == "__main__":
     # os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"
     # os.environ["NCCL_DEBUG"] = "INFO"
+    th.multiprocessing.set_start_method('spawn')
 
     os.environ[
         "TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"  # set to DETAIL for runtime logging.
