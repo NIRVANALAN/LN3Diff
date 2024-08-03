@@ -108,7 +108,7 @@ export OPENCV_IO_ENABLE_OPENEXR=1
 export OMP_NUM_THREADS=12
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_NCCL_IB_GID_INDEX=3 # https://github.com/huggingface/accelerate/issues/314#issuecomment-1821973930
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 
 torchrun --nproc_per_node=$NUM_GPUS \

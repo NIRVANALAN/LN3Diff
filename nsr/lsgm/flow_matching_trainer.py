@@ -165,9 +165,13 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
             if snr_type == 'lognorm': # by default
                 ldm_configs = OmegaConf.load(
                     'sgm/configs/img23d-clipl-compat-fm-lognorm.yaml')['ldm_configs']
-            elif snr_type == 'lognorm-mv':
+            # elif snr_type == 'lognorm-mv':
+            #     ldm_configs = OmegaConf.load(
+            #         'sgm/configs/mv23d-clipl-compat-fm-lognorm-noclip.yaml')['ldm_configs']
+            elif snr_type == 'lognorm-mv-plucker':
                 ldm_configs = OmegaConf.load(
-                    'sgm/configs/mv23d-clipl-compat-fm-lognorm.yaml')['ldm_configs']
+                    # 'sgm/configs/mv23d-plucker-clipl-compat-fm-lognorm.yaml')['ldm_configs']
+                    'sgm/configs/mv23d-plucker-clipl-compat-fm-lognorm-noclip.yaml')['ldm_configs']
             else:
                 ldm_configs = OmegaConf.load(
                     'sgm/configs/img23d-clipl-compat-fm.yaml')['ldm_configs']
@@ -559,7 +563,6 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
         # ! slightly modified for new API. combined with
         # /cpfs01/shared/V2V/V2V_hdd/yslan/Repo/generative-models/sgm/models/diffusion.py:249 log_images()
         # TODO, support batch_size > 1
-        data = iter(self.data)
 
         self.ddpm_model.eval()
         # assert unconditional_guidance_scale == 4.0
@@ -580,31 +583,6 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
 
         ucg_keys = [self.cond_key] # i23d
 
-        if self.cond_key == 'caption':
-            batch_c = {self.cond_key: prompt}
-        else: 
-            batch = next(data) # using same cond here
-            if self.cond_key == 'img-c':
-                batch_c = {
-                    self.cond_key: {
-                        'img': batch['img'].to(self.dtype).to(dist_util.dev()),
-                        'c': batch['c'].to(self.dtype).to(dist_util.dev()),
-                    },
-                    'img': batch['img'].to(self.dtype).to(dist_util.dev()) # required by clip
-                }
-
-            else:
-                batch_c = {self.cond_key: batch[self.cond_key].to(dist_util.dev()).to(self.dtype)}
-
-        with th.cuda.amp.autocast(dtype=self.dtype,
-                                    enabled=self.mp_trainer.use_amp):
-
-            c, uc = self.conditioner.get_unconditional_conditioning(
-                batch_c,
-                force_uc_zero_embeddings=ucg_keys
-                if len(self.conditioner.embedders) > 0 else [],
-            )
-
         sampling_kwargs = {'cfg_scale': unconditional_guidance_scale}
 
         N = num_samples  # hard coded, to update
@@ -615,52 +593,86 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
             self.diffusion_input_size,
             self.diffusion_input_size)
 
-        for k in c:
-            if isinstance(c[k], th.Tensor):
-                # c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
-                #                   (c, uc))
-                assert c[k].shape[0] == 1
-                c[k], uc[k] = map(lambda y: y[k].repeat_interleave(N, 0).to(dist_util.dev()),
-                                  (c, uc)) # support bs>1 sampling given a condition
-    
-        samples = self.sample(c,
-                              shape=z_shape[1:],
-                              uc=uc,
-                              batch_size=N,
-                              **sampling_kwargs)
-        # st() # do rendering first
+        data = iter(self.data)
 
-        # ! get c
-        (Path(logger.get_dir())/f'{self.step+self.resume_step}').mkdir(exist_ok=True, parents=True)
-        if 'img' in self.cond_key:
-            img_save_path = f'{logger.get_dir()}/{self.step+self.resume_step}/imgcond.jpg'
-            if 'c' in self.cond_key:
-                torchvision.utils.save_image(batch_c['img'][0], img_save_path, value_range=(-1,1), normalize=True) # torch.Size([24, 6, 3, 256, 256])
-            else:
-                torchvision.utils.save_image(batch_c['img'], img_save_path, value_range=(-1,1), normalize=True)
-
-        assert camera is not None
-        batch = {'c': camera.clone()}
-
-        # rendering
-        for i in range(samples.shape[0]):
-            th.cuda.empty_cache()
-
-            # ! render sampled latent
-            name_prefix = f'cfg={unconditional_guidance_scale}_sample-{i}'
-
-            if self.cond_key == 'caption':
-                name_prefix = f'{name_prefix}_{prompt}'
+        def sample_and_save(batch_c,idx=0):
 
             with th.cuda.amp.autocast(dtype=self.dtype,
                                         enabled=self.mp_trainer.use_amp):
 
-                self.render_video_given_triplane(
-                    samples[i:i+1].to(self.dtype),
-                    self.rec_model,  # compatible with join_model
-                    name_prefix=name_prefix,
-                    save_img=save_img,
-                    render_reference=batch,
-                   export_mesh=False)
+                c, uc = self.conditioner.get_unconditional_conditioning(
+                    batch_c,
+                    force_uc_zero_embeddings=ucg_keys
+                    if len(self.conditioner.embedders) > 0 else [],
+                )
+
+            for k in c:
+                if isinstance(c[k], th.Tensor):
+                    # c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
+                    #                   (c, uc))
+                    assert c[k].shape[0] == 1
+                    c[k], uc[k] = map(lambda y: y[k].repeat_interleave(N, 0).to(dist_util.dev()),
+                                    (c, uc)) # support bs>1 sampling given a condition
+        
+            samples = self.sample(c,
+                                shape=z_shape[1:],
+                                uc=uc,
+                                batch_size=N,
+                                **sampling_kwargs)
+            # st() # do rendering first
+
+            # ! get c
+            (Path(logger.get_dir())/f'{self.step+self.resume_step}').mkdir(exist_ok=True, parents=True)
+            if 'img' in self.cond_key:
+                img_save_path = f'{logger.get_dir()}/{self.step+self.resume_step}/imgcond-{idx}.jpg'
+                if 'c' in self.cond_key:
+                    torchvision.utils.save_image(batch_c['img'][0], img_save_path, value_range=(-1,1), normalize=True, padding=0) # torch.Size([24, 6, 3, 256, 256])
+                else:
+                    torchvision.utils.save_image(batch_c['img'], img_save_path, value_range=(-1,1), normalize=True, padding=0)
+
+            assert camera is not None
+            batch = {'c': camera.clone()[:24]}
+
+            # rendering
+            for i in range(samples.shape[0]):
+                th.cuda.empty_cache()
+
+                # ! render sampled latent
+                name_prefix = f'idx-{idx}-cfg={unconditional_guidance_scale}_sample-{i}'
+
+                if self.cond_key == 'caption':
+                    name_prefix = f'{name_prefix}_{prompt}'
+
+                with th.cuda.amp.autocast(dtype=self.dtype,
+                                            enabled=self.mp_trainer.use_amp):
+
+                    self.render_video_given_triplane(
+                        samples[i:i+1].to(self.dtype),
+                        self.rec_model,  # compatible with join_model
+                        name_prefix=name_prefix,
+                        save_img=save_img,
+                        render_reference=batch,
+                    export_mesh=save_img, 
+                    render_all=True)
+
+        if self.cond_key == 'caption':
+            batch_c = {self.cond_key: prompt}
+            sample_and_save(batch_c)
+        else: 
+            for idx, batch in enumerate(data):
+            # batch = next(data) # using same cond here
+                if self.cond_key == 'img-c':
+                    batch_c = {
+                        self.cond_key: {
+                            'img': batch['img'].to(self.dtype).to(dist_util.dev()),
+                            'c': batch['c'].to(self.dtype).to(dist_util.dev()),
+                        },
+                        'img': batch['img'].to(self.dtype).to(dist_util.dev()) # required by clip
+                    }
+
+                else:
+                    batch_c = {self.cond_key: batch[self.cond_key].to(dist_util.dev()).to(self.dtype)}
+                sample_and_save(batch_c, idx) 
+
 
         self.ddpm_model.train()

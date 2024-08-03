@@ -1,4 +1,6 @@
 import os
+import kiui
+from kiui.op import recenter
 import collections
 import math
 import time
@@ -16,6 +18,7 @@ from pdb import set_trace as st
 from pathlib import Path
 import torchvision
 
+from nsr.camera_utils import generate_input_camera
 from einops import rearrange, repeat
 from functools import partial
 import io
@@ -265,6 +268,7 @@ def load_eval_data(
 
     elif load_real:
         dataset = RealDataset(file_path,
+        # dataset = RealMVDataset(file_path,
                               reso,
                               reso_encoder,
                               preprocess=preprocess,
@@ -1087,6 +1091,9 @@ class RealDataset(Dataset):
             t for t in os.listdir(self.file_path)
             if t.split('.')[1] in ['png', 'jpg']
         ]
+
+        all_fname = [name for name in all_fname if '-input' in name ]
+
         self.rgb_list += ([
             os.path.join(self.file_path, fname) for fname in all_fname
         ])
@@ -1117,64 +1124,6 @@ class RealDataset(Dataset):
         # pre-cache
         # self.calc_rays_plucker()
 
-    # def gen_rays(self, c):
-    #     # Generate rays
-    #     intrinsics, c2w = c[16:], c[:16].reshape(4, 4)
-    #     self.h = self.reso_encoder
-    #     self.w = self.reso_encoder
-    #     yy, xx = torch.meshgrid(
-    #         torch.arange(self.h, dtype=torch.float32) + 0.5,
-    #         torch.arange(self.w, dtype=torch.float32) + 0.5,
-    #         indexing='ij')
-
-    #     # normalize to 0-1 pixel range
-    #     yy = yy / self.h
-    #     xx = xx / self.w
-
-    #     # K = np.array([f_x, 0, w / 2, 0, f_y, h / 2, 0, 0, 1]).reshape(3, 3)
-    #     cx, cy, fx, fy = intrinsics[2], intrinsics[5], intrinsics[
-    #         0], intrinsics[4]
-    #     # cx *= self.w
-    #     # cy *= self.h
-
-    #     # f_x = f_y = fx * h / res_raw
-    #     if not isinstance(c2w, torch.Tensor):
-    #         c2w = torch.from_numpy(c2w)
-
-    #     c2w = c2w.float()
-
-    #     xx = (xx - cx) / fx
-    #     yy = (yy - cy) / fy
-    #     zz = torch.ones_like(xx)
-    #     dirs = torch.stack((xx, yy, zz), dim=-1)  # OpenCV convention
-    #     dirs /= torch.norm(dirs, dim=-1, keepdim=True)
-    #     dirs = dirs.reshape(-1, 3, 1)
-    #     del xx, yy, zz
-    #     # st()
-    #     dirs = (c2w[None, :3, :3] @ dirs)[..., 0]
-
-    #     origins = c2w[None, :3, 3].expand(self.h * self.w, -1).contiguous()
-    #     origins = origins.view(self.h, self.w, 3)
-    #     dirs = dirs.view(self.h, self.w, 3)
-
-    #     return origins, dirs
-
-    # def calc_rays_plucker(self):
-    #     all_rays_plucker = []
-
-    #     for c2w in self.eval_camera:
-    #         rays_o, rays_d = self.gen_rays(c2w)
-    #         rays_plucker = torch.cat(
-    #             [torch.cross(rays_o, rays_d, dim=-1), rays_d],
-    #             dim=-1)  # [h, w, 6]
-    #         all_rays_plucker.append(rays_plucker)
-
-    #     self.all_rays_plucker = torch.stack(all_rays_plucker,
-    #                                         0).permute(0, 3, 1, 2)  # B 6 H W
-
-    #     # st()
-    #     pass
-
     def __len__(self):
         return len(self.rgb_list)
 
@@ -1194,17 +1143,7 @@ class RealDataset(Dataset):
                 1 - alpha_mask) * bg_white  #[3, reso_encoder, reso_encoder]
             raw_img = raw_img.astype(np.uint8)
 
-        # img_to_encoder = cv2.resize(raw_img,
-        #                             (self.reso_encoder, self.reso_encoder),
-        #                             interpolation=cv2.INTER_LANCZOS4)
-
-        # img_to_encoder = img_to_encoder
-        # img_to_encoder = self.normalize(img_to_encoder)
-
-        # ! concat plucker
-        # img_to_encoder = torch.cat(
-        #     [img_to_encoder, self.all_rays_plucker[index]],
-        #     0)  # concat in C dim
+        # raw_img = recenter(raw_img, np.ones_like(raw_img), border_ratio=0.2)
 
         # log gt
         img = cv2.resize(raw_img, (self.reso, self.reso),
@@ -1228,6 +1167,196 @@ class RealDataset(Dataset):
         # ! repeat as a intance
 
         return ret_dict
+
+
+
+class RealMVDataset(Dataset):
+
+    def __init__(
+            self,
+            file_path,
+            reso,
+            reso_encoder,
+            preprocess=None,
+            classes=False,
+            load_depth=False,
+            test=False,
+            scene_scale=1,
+            overfitting=False,
+            imgnet_normalize=True,
+            dataset_size=-1,
+            overfitting_bs=-1,
+            interval=1,
+            plucker_embedding=False,
+            shuffle_across_cls=False,
+            wds_split=1,  # 4 splits to accelerate preprocessing
+    ) -> None:
+        super().__init__()
+
+        self.file_path = file_path
+        self.overfitting = overfitting
+        self.scene_scale = scene_scale
+        self.reso = reso
+        self.reso_encoder = reso_encoder
+        self.classes = False
+        self.load_depth = load_depth
+        self.preprocess = preprocess
+        self.plucker_embedding = plucker_embedding
+
+        self.rgb_list = []
+
+        all_fname = [
+            t for t in os.listdir(self.file_path)
+            if t.split('.')[1] in ['png', 'jpg']
+        ]
+        # all_fname = [name for name in all_fname if '-input' in name ]
+        # all_fname = [name for name in all_fname if 'sorting_board-input' in name ]
+        # all_fname = [name for name in all_fname if 'teasure_chest-input' in name ]
+        all_fname = [name for name in all_fname if 'bubble_mart_blue-input' in name ]
+        # all_fname = [name for name in all_fname if 'chair_comfort-input' in name ]
+        self.rgb_list += ([
+            os.path.join(self.file_path, fname) for fname in all_fname
+        ])
+        # if len(self.rgb_list) == 1:
+        #     # placeholder
+        #     self.rgb_list = self.rgb_list * 40
+
+        # ! setup normalizataion
+        transformations = [
+            transforms.ToTensor(),  # [0,1] range
+        ]
+
+        # load zero123pp pose
+        # '''
+        camera = torch.load('assets/objv_eval_pose.pt', map_location='cpu') # 40, 25
+        # v=6 render
+        # zero123pp_pose = torch.load('assets/input_cameras.pt', map_location='cpu')[0]
+        # zero123pp_pose = torch.load('assets/input_cameras_1.5.pt', map_location='cpu')[0]
+        # V = zero123pp_pose.shape[0]
+
+        # zero123pp_pose = torch.cat([zero123pp_pose[:, :12], # change radius to 1.5 here
+        #     torch.Tensor([0,0,0,1]).reshape(1,4).repeat_interleave(V, 0).to(camera),
+        #     camera[:V, 16:]], 
+        # 1)
+        azimuths = np.array([30, 90, 150, 210, 270, 330]).astype(float)
+        elevations = np.array([20, -10, 20, -10, 20, -10]).astype(float)
+
+        # zero123pp_pose, _ = generate_input_camera(1.6, [[elevations[i], azimuths[i]] for i in range(6)], fov=30)
+        zero123pp_pose, _ = generate_input_camera(2.0, [[elevations[i], azimuths[i]] for i in range(6)], fov=30)
+        K = torch.Tensor([1.3889, 0.0000, 0.5000, 0.0000, 1.3889, 0.5000, 0.0000, 0.0000, 0.0039]).to(zero123pp_pose) # keeps the same
+        # st()
+        zero123pp_pose = torch.cat([zero123pp_pose.reshape(6,-1), K.unsqueeze(0).repeat(6,1)], dim=-1)
+
+        # ! directly adopt gt input 
+        # self.indices = np.array([0,2,4,5])
+        # eval_camera = zero123pp_pose[self.indices]
+        # self.eval_camera = torch.cat([torch.zeros_like(eval_camera[0:1]),eval_camera], 0) # first c not used as condition here, just placeholder
+
+        # ! adopt mv-diffusion output as input.
+        # self.indices = np.array([1,0,2,4,5])
+        self.indices = np.array([0,1,2,3,4,5])
+        eval_camera = zero123pp_pose[self.indices].float().cpu().numpy() # for normalization
+
+        # eval_camera = zero123pp_pose[self.indices]
+        # self.eval_camera = eval_camera
+        # self.eval_camera = torch.cat([torch.zeros_like(eval_camera[0:1]),eval_camera], 0) # first c not used as condition here, just placeholder
+
+        # # * normalize here
+        self.eval_camera = self.normalize_camera(eval_camera, eval_camera[0:1]) # the first img is not used. 
+
+        # st()
+        # self.eval_camera = self.eval_camera + np.random.randn(*self.eval_camera.shape) * 0.04 - 0.02
+
+        # '''
+        # self.eval_camera = torch.load('/nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-XL2-MV-ampFast/gpu1-batch10-lr0-bf16-qknorm-fixinpRange-debug/2590000_c.pt')[1:6].float().cpu().numpy()
+        # self.eval_camera = self.normalize_camera(self.eval_camera, self.eval_camera[0:1])
+        # self.eval_camera = self.eval_camera + np.random.randn(*self.eval_camera.shape) * 0.04 - 0.02
+        # pass
+
+        # FIXME check how sensitive it is: requries training augmentation.
+        # self.eval_camera = torch.load('/nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-XL2-MV-ampFast/gpu1-batch10-lr0-bf16-qknorm-fixinpRange-debug/2590000_c.pt')[1:]
+
+    def normalize_camera(self, c, c_frame0):
+        # assert c.shape[0] == self.chunk_size  # 8 o r10
+
+        B = c.shape[0]
+        camera_poses = c[:, :16].reshape(B, 4, 4)  # 3x4
+        canonical_camera_poses = c_frame0[:, :16].reshape(1, 4, 4)
+        inverse_canonical_pose = np.linalg.inv(canonical_camera_poses)
+        inverse_canonical_pose = np.repeat(inverse_canonical_pose, B, 0)
+
+        cam_radius = np.linalg.norm(
+            c_frame0[:, :16].reshape(1, 4, 4)[:, :3, 3],
+            axis=-1,
+            keepdims=False)  # since g-buffer adopts dynamic radius here.
+
+        frame1_fixed_pos = np.repeat(np.eye(4)[None], 1, axis=0)
+        frame1_fixed_pos[:, 2, -1] = -cam_radius
+
+        transform = frame1_fixed_pos @ inverse_canonical_pose
+
+        new_camera_poses = np.repeat(
+            transform, 1, axis=0
+        ) @ camera_poses  # [V, 4, 4]. np.repeat() is th.repeat_interleave()
+
+        c = np.concatenate([new_camera_poses.reshape(B, 16), c[:, 16:]],
+                           axis=-1)
+
+        return c
+
+    def __len__(self):
+        return len(self.rgb_list)
+
+    def __getitem__(self, index) -> Any:
+        # return super().__getitem__(index)
+
+        rgb_fname = self.rgb_list[index]
+
+        # ! if loading training imgs
+        # raw_img = imageio.imread(rgb_fname)
+        # if raw_img.shape[-1] == 4:
+        #     alpha_mask = raw_img[..., 3:4] / 255.0
+        #     bg_white = np.ones_like(alpha_mask) * 255.0
+        #     raw_img = raw_img[..., :3] * alpha_mask + (
+        #         1 - alpha_mask) * bg_white  #[3, reso_encoder, reso_encoder]
+        #     raw_img = raw_img.astype(np.uint8)
+
+        # img = rearrange(raw_img, 'h (n w) c -> n c h w', n=6)[self.indices]
+        # img = torch.from_numpy(img) / 127.5 - 1 #
+
+        # '''
+        # img = cv2.resize(raw_img, (320,320),
+        #                  interpolation=cv2.INTER_LANCZOS4) # for easy concat
+        # img = torch.from_numpy(img)[..., :3].permute(
+        #     2, 0, 1
+        # ) / 127.5 - 1  #[3, reso, reso], normalize to [-1,1], follow triplane range
+
+        # img = rearrange(raw_img, 'h (n w) c -> n c h w', n=6)[1:6] # ! if loading gt inp views
+
+        # '''
+        # ! if loading mv-diff output views
+        mv_img = imageio.imread(rgb_fname.replace('-input', ''))
+        # st()
+        # mv_img = rearrange(mv_img, '(n h) (m w) c -> (n m) c h w', n=3, m=2)        # (6, 3, 320, 320)
+        mv_img = rearrange(mv_img, '(n h) (m w) c -> (n m) h w c', n=3, m=2)[self.indices]        # (6, 3, 320, 320)
+        mv_img = np.stack([recenter(img, np.ones_like(img), border_ratio=0.2) for img in mv_img], axis=0)
+        # mv_img = np.stack([recenter(img, np.ones_like(img), border_ratio=0.3) for img in mv_img], axis=0)
+        # mv_img = np.stack([recenter(img, np.ones_like(img), border_ratio=0.1) for img in mv_img], axis=0)
+        # mv_img = np.stack([recenter(img, np.ones_like(img), border_ratio=0.4) for img in mv_img], axis=0)
+        mv_img = rearrange(mv_img, 'b h w c -> b c h w') # to torch tradition
+        mv_img = torch.from_numpy(mv_img) / 127.5 - 1
+
+        # img = torch.cat([img[None], mv_img], 0)
+        img = mv_img # ! directly adopt output views for reconstruction/generation
+        # '''
+
+        ret_dict = {
+            'img': img,
+            'c': self.eval_camera
+        }
+
+        return ret_dict
+
 
 
 class NovelViewObjverseDataset(MultiViewObjverseDataset):

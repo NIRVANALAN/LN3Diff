@@ -630,11 +630,12 @@ class TrainLoop3DRec(TrainLoopBasic):
             vtx = (vtx / (mesh_size-1) * 2 - 1 ) * grid_scale[1] # normalize to g-buffer objav dataset scale
 
             # ! save normalized color to the vertex
-            vtx_tensor = th.tensor(vtx, dtype=th.float32, device=dist_util.dev()).unsqueeze(0)
-            vtx_colors = rec_model.module.decoder.forward_points(ddpm_latent['latent_after_vit'], vtx_tensor)['rgb'].squeeze(0).cpu().numpy()  # (0, 1)
-            vtx_colors = (vtx_colors.clip(0,1) * 255).astype(np.uint8)
+            # vtx_tensor = th.tensor(vtx, dtype=th.float32, device=dist_util.dev()).unsqueeze(0)
+            # vtx_colors = rec_model.module.decoder.forward_points(ddpm_latent['latent_after_vit'], vtx_tensor)['rgb'].squeeze(0).cpu().numpy()  # (0, 1)
+            # vtx_colors = (vtx_colors.clip(0,1) * 255).astype(np.uint8)
 
-            mesh = trimesh.Trimesh(vertices=vtx, faces=faces, vertex_colors=vtx_colors)
+            # mesh = trimesh.Trimesh(vertices=vtx, faces=faces, vertex_colors=vtx_colors)
+            mesh = trimesh.Trimesh(vertices=vtx, faces=faces)
 
             # mesh = trimesh.Trimesh(
             #     vertices=vtx,
@@ -688,7 +689,7 @@ class TrainLoop3DRec(TrainLoopBasic):
             render_reference = [{
                 k: v[idx:idx + 1]
                 for k, v in render_reference.items()
-            } for idx in range(40)]
+            } for idx in range(render_reference['c'].shape[0])]
 
         # for i, batch in enumerate(tqdm(self.eval_data)):
         for i, batch in enumerate(tqdm(render_reference)):

@@ -446,6 +446,9 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
         sampling_kwargs = {}
 
         N = 1  # hard coded, to update
+        # N = 32  # hard coded, to update
+        # th.manual_seed(42) # fix randn seed for all prompt
+        th.manual_seed(41) # fix randn seed for all prompt
         z_shape = (
             N,
             self.ddpm_model.in_channels if not self.ddpm_model.roll_out else
@@ -453,10 +456,18 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
             self.diffusion_input_size,
             self.diffusion_input_size)
 
+        # for k in c:
+        #     if isinstance(c[k], th.Tensor):
+        #         c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
+        #                           (c, uc))
+
         for k in c:
             if isinstance(c[k], th.Tensor):
-                c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
-                                  (c, uc))
+                # c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
+                #                   (c, uc))
+                assert c[k].shape[0] == 1
+                c[k], uc[k] = map(lambda y: y[k].repeat_interleave(N, 0).to(dist_util.dev()),
+                                  (c, uc)) # support bs>1 sampling given a condition
 
         samples = self.sample(c,
                               shape=z_shape[1:],
@@ -470,7 +481,9 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
         if self.cond_key == 'caption':
             if camera is not None:
                 batch = {'c': camera.clone()}
+            prefix = prompt
         else:
+            prefix = ''
             if use_train_trajectory:
                 batch = next(iter(self.data))
             else:
@@ -496,7 +509,7 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
                     samples[i:i+1].to(self.dtype),
                     self.rec_model,  # compatible with join_model
                     name_prefix=
-                    f'{self.step + self.resume_step}_{i}',
+                    f'{self.step + self.resume_step}{prefix}_{i}',
                     save_img=save_img,
                     render_reference=batch,
                     export_mesh=False)

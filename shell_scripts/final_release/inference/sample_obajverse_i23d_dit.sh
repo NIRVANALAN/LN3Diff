@@ -11,12 +11,16 @@ batch_size=1
 microbatch=${batch_size}
 
 # num_samples=$((50/${batch_size})) # follow ssdnerf and functa
+# num_samples=4 # how many samples per prompt
 num_samples=4 # how many samples per prompt
 cfg_dropout_prob=0.1 # SD config
 num_workers=0
 
 # data_dir='./assets/stage1_vae_reconstruction/Objaverse'
-eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/examples
+# eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/examples
+# eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/output/instant-mesh-large/images
+# eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/test_dir
+eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/output/instant-mesh-large/images
 # eval_path='logs/examples'
 
 DATASET_FLAGS="
@@ -72,7 +76,6 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  "
 
 
-
 DDPM_MODEL_FLAGS="
 --learn_sigma False \
 --num_heads 8 \
@@ -109,7 +112,8 @@ DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 
 
 
-logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/
+# logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/
+logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/all_samples
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -127,11 +131,9 @@ SR_TRAIN_FLAGS_v1_2XC="
 # --resume_checkpoint /mnt/lustre/yslan/logs/nips23/LSGM/ssd/chair/scaling/entropy/kl0_ema0.9999_vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_weightingv0_lsgm_unfreezeD_0.01_gradclip_nocesquare_clipH@0_noallAMP_dataset500/model_joint_denoise_rec_model0910000.pt \
 
 
-unconditional_guidance_scale=4.0
-
-# for unconditional_guidance_scale in 1.0 2.0 3.0 4.0 5.0 6.0 6.5 7
-
-# do
+# unconditional_guidance_scale=6.5
+# unconditional_guidance_scale=4
+unconditional_guidance_scale=5
 
 DDIM_FLAGS="
 --unconditional_guidance_scale ${unconditional_guidance_scale} \
@@ -200,6 +202,7 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --snr-type lognorm \
  --use_eos_feature False \
  --load_real True \
+ --save_img True \
  --use_wds False \
 
 #  done

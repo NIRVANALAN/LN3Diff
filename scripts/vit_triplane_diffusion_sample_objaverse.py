@@ -176,26 +176,66 @@ def main(args):
             json.dump(vars(args), f, indent=2)
 
         # ! use pre-saved camera pose form g-buffer objaverse
-        camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[:]
+        # camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[:]
+        # camera = th.load('assets/render_cameras_1.5.pt', map_location=dist_util.dev())[0, ::4]
+        camera = th.load('assets/elev-traj.pt', map_location=dist_util.dev())
+        train_c = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[0:1]
+
+        camera = th.cat([camera.reshape(36,16),train_c.repeat(36,1)[:,16:]], -1)
 
         # ! debug cfg
 
         # for unconditional_guidance_scale in [1,2,3,4,5,6,6.5,7]:
         # for unconditional_guidance_scale in [4,5,6,7,8,9,10]:
 
-        training_loop_class.eval_cldm(
-                prompt=args.prompt,
-                # unconditional_guidance_scale=args.
-                # unconditional_guidance_scale,
-                unconditional_guidance_scale=unconditional_guidance_scale,
-                use_ddim=args.use_ddim,
-                save_img=args.save_img,
-                use_train_trajectory=args.use_train_trajectory,
-                camera=camera,
-                num_instances=args.num_instances,
-                num_samples=args.num_samples,
-                export_mesh=args.export_mesh, 
-            )
+        for prompt in [
+            'The Eiffel tower.', 
+            # 'a stone water well with a wooden shed.',
+            # 'A wooden chest with golden trim',
+            # 'A plate of sushi.', 
+            # 'A wooden worktable', 
+
+            # 'An engineer', 
+            # 'A bowl of food.', 
+            # "a voxelized dog",
+            # 'A castle made of stone',
+            # 'A blue robot with a humanoid body',
+            # 'A stone fountain with a spout.',
+            # 'A wooden desk with a drawer.',
+            # 'A green toy dinosaur',
+            # 'A dragon with a crown on its head and wings',
+            # 'A purple dragon toy with horns.', # not bad
+            # 'A red rose in a brown pot.',
+            # 'A black camera with a lens.',
+            # 'A 18th century cannon.',
+            # 'A birthday cupcake', 
+            # 'A superman.', 
+            # 'A tank', 
+            # 'A Doughnut.', 
+            # 'An UFO space aircraft',
+            # 'A sailboat.',
+            # 'A cute toy cat',
+            # 'A red mushroom.', 
+            # 'A red racing car.',
+            # 'A bird with a red hat',
+            # 'A happy pikachu.', 
+            # from volumeDiffusion
+            ]:
+
+            training_loop_class.eval_cldm(
+                    # prompt=args.prompt,
+                    prompt=prompt,
+                    unconditional_guidance_scale=args.
+                    unconditional_guidance_scale,
+                    # unconditional_guidance_scale=unconditional_guidance_scale,
+                    use_ddim=args.use_ddim,
+                    save_img=args.save_img,
+                    use_train_trajectory=args.use_train_trajectory,
+                    camera=camera,
+                    num_instances=args.num_instances,
+                    num_samples=args.num_samples,
+                    export_mesh=args.export_mesh, 
+                )
 
 
     dist.barrier()

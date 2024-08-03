@@ -207,7 +207,7 @@ class TrainLoopDiffusionWithRec(TrainLoop):
             )
 
             vtx, faces = mcubes.marching_cubes(
-                grid_out['sigma'].squeeze(0).squeeze(-1).cpu().numpy(),
+                grid_out['sigma'].float().squeeze(0).squeeze(-1).cpu().numpy(),
                 mesh_thres)
             vtx = vtx / (mesh_size - 1) * 2 - 1
 
@@ -332,13 +332,12 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                     sampled_img = Image.fromarray(
                         (gen_img[batch_idx].permute(1, 2, 0).cpu().numpy() *
                          127.5 + 127.5).clip(0, 255).astype(np.uint8))
-                    if sampled_img.size != (512, 512):
-                        sampled_img = sampled_img.resize(
-                            (128, 128), Image.HAMMING)  # for shapenet
+                    # if sampled_img.size != (512, 512):
+                    #     sampled_img = sampled_img.resize(
+                    #         (128, 128), Image.HAMMING)  # for shapenet
                     sampled_img.save(logger.get_dir() +
                                      '/FID_Cals/{}_{}.png'.format(
-                                         int(name_prefix) * batch_size +
-                                         batch_idx, i))
+                                         name_prefix, f'{batch_idx}-{i}'))
                     # print('FID_Cals/{}_{}.png'.format(int(name_prefix)*batch_size+batch_idx, i))
 
             vis = pred_vis.permute(0, 2, 3, 1).cpu().numpy()

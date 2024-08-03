@@ -402,7 +402,7 @@ def create_model(
                 in_channels=denoise_in_channels,
                 context_dim=context_dim,  # add CLIP text embedding
                 roll_out=roll_out, 
-                vit_blk=ImageCondDiTBlock, 
+                # vit_blk=ImageCondDiTBlock, 
                 pooling_ctx_dim=pooling_ctx_dim,)
         else: # t23d
             return DiT_models_t23d[dit_model_arch](

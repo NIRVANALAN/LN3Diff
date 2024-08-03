@@ -257,7 +257,9 @@ def training_loop(args):
         **vars(args))
 
     if args.inference:
-        camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())
+        # camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev()) # 40, 25
+        camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[:24] # 40, 25
+
         train_loop.eval_novelview_loop(camera=camera,
                                        save_latent=args.save_latent)
     else:

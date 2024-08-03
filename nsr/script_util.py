@@ -796,6 +796,45 @@ def rendering_options_defaults(opts):
         rendering_options['z_near'] = rendering_options['radius_range'][0]+rendering_options['sampler_bbox_min']
         rendering_options['z_far'] = rendering_options['radius_range'][1]+rendering_options['sampler_bbox_max']
 
+
+    elif opts.cfg == 'objverse_tuneray_aug_resolution_128_128_auto':  # to differentiate hwc
+        rendering_options.update({
+            'depth_resolution':
+            128,
+            'depth_resolution_importance':
+            128,
+            # * radius 1.2 setting, newly rendered images
+            'ray_start':
+            'auto',
+            'ray_end':
+            'auto',
+            'box_warp':
+            0.9,
+            'white_back':
+            True,
+            'radius_range': [1.5,2],
+            # 'z_near': 1.5-0.45, # radius in [1.5, 2], https://github.com/modelscope/richdreamer/issues/12#issuecomment-1897734616
+            # 'z_far': 2.0+0.45,
+            'sampler_bbox_min':
+            -0.45,
+            'sampler_bbox_max':
+            0.45,
+            # 'avg_camera_pivot': [0, 0, 0], # not used
+            'filter_out_of_bbox':
+            True,
+            # 'superresolution_module':
+            # 'utils.torch_utils.components.NearestConvSR',
+            # patch configs
+            'PatchRaySampler':
+            True,
+            # 'patch_rendering_resolution': 32,
+            # 'patch_rendering_resolution': 48,
+            'patch_rendering_resolution':
+            opts.patch_rendering_resolution,
+        })
+        rendering_options['z_near'] = rendering_options['radius_range'][0]+rendering_options['sampler_bbox_min']
+        rendering_options['z_far'] = rendering_options['radius_range'][1]+rendering_options['sampler_bbox_max']
+
     elif opts.cfg == 'objverse_tuneray_aug_resolution_96_96_auto':  # to differentiate hwc
         rendering_options.update({
             'depth_resolution':

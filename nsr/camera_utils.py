@@ -12,6 +12,7 @@ Helper functions for constructing camera parameter matrices. Primarily used in v
 """
 
 import math
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -191,3 +192,38 @@ def FOV_to_intrinsics(fov_degrees, device='cpu'):
         [[focal_length, 0, 0.5], [0, focal_length, 0.5], [0, 0, 1]],
         device=device)
     return intrinsics
+
+def generate_input_camera(r, poses, device='cpu', fov=30):
+    def normalize_vecs(vectors): return vectors / (torch.norm(vectors, dim=-1, keepdim=True))
+    poses = np.deg2rad(poses)
+    poses = torch.tensor(poses).float()
+    pitch = poses[:, 0]
+    yaw = poses[:, 1]
+
+    z = r*torch.sin(pitch)
+    x = r*torch.cos(pitch)*torch.cos(yaw)
+    y = r*torch.cos(pitch)*torch.sin(yaw)
+    cam_pos = torch.stack([x, y, z], dim=-1).reshape(z.shape[0], -1).to(device)
+
+    forward_vector = normalize_vecs(-cam_pos)
+    up_vector = torch.tensor([0, 0, -1], dtype=torch.float,
+                                        device=device).reshape(-1).expand_as(forward_vector)
+    left_vector = normalize_vecs(torch.cross(up_vector, forward_vector,
+                                                        dim=-1))
+
+    up_vector = normalize_vecs(torch.cross(forward_vector, left_vector,
+                                                        dim=-1))
+    rotate = torch.stack(
+                    (left_vector, up_vector, forward_vector), dim=-1)
+
+    rotation_matrix = torch.eye(4, device=device).unsqueeze(0).repeat(forward_vector.shape[0], 1, 1)
+    rotation_matrix[:, :3, :3] = rotate
+
+    translation_matrix = torch.eye(4, device=device).unsqueeze(0).repeat(forward_vector.shape[0], 1, 1)
+    translation_matrix[:, :3, 3] = cam_pos
+    cam2world = translation_matrix @ rotation_matrix
+
+    fx = 0.5/np.tan(np.deg2rad(fov/2))
+    fxfycxcy = torch.tensor([fx, fx, 0.5, 0.5], dtype=rotate.dtype, device=device)
+
+    return cam2world, fxfycxcy

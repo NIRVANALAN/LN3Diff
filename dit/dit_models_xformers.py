@@ -35,6 +35,7 @@ if torch.cuda.is_available():
     # from xformers.triton import FusedLayerNorm as LayerNorm # compat issue
     from xformers.components.activations import build_activation, Activation
     from xformers.components.feedforward import fused_mlp
+    # from xformers.components.feedforward import mlp
 
 from ldm.modules.attention import MemoryEfficientCrossAttention
 
@@ -416,7 +417,7 @@ class ImageCondDiTBlock(DiTBlock):
                  context_dim,
                  mlp_ratio=4,
                  enable_rmsnorm=False,
-                 qk_norm=False,
+                 qk_norm=True,
                  **block_kwargs):
         super().__init__(hidden_size=hidden_size,
                          num_heads=num_heads,
@@ -425,10 +426,12 @@ class ImageCondDiTBlock(DiTBlock):
                          enable_rmsnorm=enable_rmsnorm,
                          qk_norm=qk_norm,
                          **block_kwargs)
-        assert qk_norm
+        # assert qk_norm
         self.cross_attn = MemoryEfficientCrossAttention(
             query_dim=hidden_size,
             context_dim=context_dim, # ! mv-cond
+            # context_dim=1280,  # clip vit-G, adopted by SVD.
+            # context_dim=1024,  # clip vit-L
             heads=num_heads,
             enable_rmsnorm=enable_rmsnorm, 
             qk_norm=qk_norm)
@@ -478,7 +481,7 @@ class ImageCondDiTBlockPixelArt(ImageCondDiTBlock):
                  context_dim,
                  mlp_ratio=4,
                  enable_rmsnorm=False,
-                 qk_norm=False,
+                 qk_norm=True,
                  **block_kwargs):
         # super().__init__(hidden_size, num_heads, mlp_ratio, enable_rmsnorm=True, **block_kwargs)
         super().__init__(hidden_size=hidden_size,
@@ -530,6 +533,68 @@ class ImageCondDiTBlockPixelArt(ImageCondDiTBlock):
 
         return x
 
+class ImageCondDiTBlockPixelArtNoclip(ImageCondDiTBlock):
+    # follow EMU and SVD, concat + cross attention. Also adopted by concurrent work Direct3D.
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 context_dim,
+                 mlp_ratio=4,
+                 enable_rmsnorm=False,
+                 qk_norm=False,
+                 **block_kwargs):
+        # super().__init__(hidden_size, num_heads, mlp_ratio, enable_rmsnorm=True, **block_kwargs)
+        super().__init__(hidden_size=hidden_size,
+                         num_heads=num_heads,
+                         mlp_ratio=mlp_ratio,
+                         context_dim=context_dim,
+                         enable_rmsnorm=False,
+                         qk_norm=True, # otherwise AMP fail
+                         **block_kwargs)
+        self.scale_shift_table = nn.Parameter(
+            torch.randn(6, hidden_size) / hidden_size**0.5)
+        self.adaLN_modulation = None  # single-adaLN
+        # self.attention_y_norm = RMSNorm(
+        #     1024, eps=1e-5
+        # )  # https://github.com/Alpha-VLLM/Lumina-T2X/blob/0c8dd6a07a3b7c18da3d91f37b1e00e7ae661293/lumina_t2i/models/model.py#L570C9-L570C61
+
+    # def forward(self, x, t, dino_spatial_token, clip_spatial_token):
+    def forward(self, x, t, dino_spatial_token):
+        B, N, C = x.shape
+        # assert isinstance(context, dict)
+        # assert isinstance(context, dict) # clip + dino.
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        #    self.scale_shift_table[None] + t.reshape(B,6,-1)).chunk(6, dim=1)
+
+        # TODO t is t + [clip_cls] here. update in base class.
+
+        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(
+        # t).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
+        # st()
+
+        post_modulate_selfattn_feat = t2i_modulate(self.norm1(x), shift_msa, scale_msa)
+
+            # t2i_modulate(self.norm1(x), shift_msa, scale_msa),
+            # dino_spatial_token
+        # ],
+                                                # dim=1)  # concat in L dim
+
+        # x = x + gate_msa.unsqueeze(1) * self.attn(
+        x = x + gate_msa * self.attn(post_modulate_selfattn_feat) # remove dino-feat to maintain unchanged dimension.
+
+        # add clip_i spatial embedder via cross attention
+        # st()
+        x = x + self.cross_attn(x, dino_spatial_token) # attention_y_norm not required, since x_norm_patchtokens?
+        # x = x + self.cross_attn(x, self.attention_y_norm(clip_spatial_token)) # attention_y_norm not required, since x_norm_patchtokens?
+
+        x = x + gate_mlp * self.mlp(
+            t2i_modulate(self.norm2(x), shift_mlp, scale_mlp))
+
+        return x
+
 
 class ImageCondDiTBlockPixelArtRMSNorm(ImageCondDiTBlockPixelArt):
     # follow EMU and SVD, concat + cross attention. Also adopted by concurrent work Direct3D.
@@ -547,6 +612,22 @@ class ImageCondDiTBlockPixelArtRMSNorm(ImageCondDiTBlockPixelArt):
                          norm_type='rmsnorm',
                          **block_kwargs)
 
+
+class ImageCondDiTBlockPixelArtRMSNormNoClip(ImageCondDiTBlockPixelArtNoclip):
+    # follow EMU and SVD, concat + cross attention. Also adopted by concurrent work Direct3D.
+    def __init__(self,
+                 hidden_size,
+                 num_heads,
+                 context_dim,
+                 mlp_ratio=4,
+                 **block_kwargs):
+        super().__init__(hidden_size=hidden_size,
+                         num_heads=num_heads,
+                         mlp_ratio=mlp_ratio,
+                         context_dim=context_dim,
+                         enable_rmsnorm=False,
+                         norm_type='rmsnorm',
+                         **block_kwargs)
 
 class DiTBlockRollOut(DiTBlock):
     """
@@ -664,10 +745,29 @@ class DiT(nn.Module):
                     mlp_ratio=mlp_ratio,
                     context_dim=context_dim) for _ in range(depth)
         ])
+        # else:
+        #     self.blocks = nn.ModuleList([
+        #         DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) if idx % 2 == 0 else
+        #         DiTBlockRollOut(hidden_size, num_heads, mlp_ratio=mlp_ratio)
+        #         for idx in range(depth)
+        #     ])
 
         self.final_layer = final_layer_blk(hidden_size, patch_size,
                                            self.out_channels)
         self.initialize_weights()
+
+        # self.mixed_prediction = mixed_prediction  # This enables mixed prediction
+        # if self.mixed_prediction:
+        #     if self.roll_out:
+        #         logit_ch = in_channels * 3
+        #     else:
+        #         logit_ch = in_channels
+        #     init = mixing_logit_init * torch.ones(
+        #         size=[1, logit_ch, 1, 1])  # hard coded for now
+        #     self.mixing_logit = torch.nn.Parameter(init, requires_grad=True)
+
+    # def len(self):
+    #     return len(self.blocks)
 
     def initialize_weights(self):
         # Initialize transformer layers:

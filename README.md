@@ -11,10 +11,10 @@ LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
     <a href='https://shangchenzhou.com/' target='_blank'>Shangchen Zhou</a><sup>1</sup>&emsp;
     <a href='https://sg.linkedin.com/in/xuyi-meng-673779208' target='_blank'>Xuyi Meng</a><sup>1</sup>&emsp;
     <br>
-    <a href='https://xingangpan.github.io/' target='_blank'>Xingang Pan</a>
-    <sup>1</sup>
     <a href='https://daibo.info/' target='_blank'>Bo Dai</a>
     <sup>3</sup>
+    <a href='https://xingangpan.github.io/' target='_blank'>Xingang Pan</a>
+    <sup>1</sup>
     <a href='https://www.mmlab-ntu.com/person/ccloy/' target='_blank'>Chen Change Loy</a>
     <sup>1</sup> &emsp;
 </div>
@@ -98,6 +98,8 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :mega: Updates
 
+[08/2024] We have released the new 3D VAE trained on G-Objaverse full sets, and the corresponding DiT-based T23D and I23D model, trained with flow-matching. Please see the samples below.
+
 [06/2024] LN3Diff got accepted to ECCV 2024 :partying_face:! 
 
 [03/2024] Initial release.
@@ -107,16 +109,17 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :dromedary_camel: TODO
 
-- [ ] Release DiT-based 3D generation framework.
+- [x] Release the new T23D and I23D DiT model trained with 180K G-Objaverse instances (Aug 2024).
+- [x] Release the new 3D VAE trained with 180K G-Objaverse instances (July 2024).
+- [x] Release DiT-based, flow-matching based 3D generation framework (July 2024).
 - [ ] Polish the dataset preparation and training doc.
 - [ ] add metrics evaluation scripts and samples.
 - [ ] Lint the code.
 - [ ] Add Gradio demo.
-- [ ] Release the new T23D Objaverse model trained with 80K+ instances dataset.
-- [x] Release the inference and training code.
-- [x] Release the pre-trained checkpoints of ShapeNet and FFHQ.
-- [x] Release the pre-trained checkpoints of T23D Objaverse model trained with 30K+ instances dataset.
-- [x] Release the stage-1 VAE of Objaverse trained with 80K+ instances dataset.
+- [x] Release the inference and training code (Apr 2024).
+- [x] Release the pre-trained checkpoints of ShapeNet and FFHQ (Apr 2024).
+- [x] Release the pre-trained checkpoints of T23D Objaverse model trained with 30K+ instances dataset (Apr 2024).
+- [x] Release the stage-1 VAE of Objaverse trained with 80K+ instances dataset (Apr 2024).
 
 
 
@@ -152,7 +155,7 @@ pip install git+https://github.com/nupurkmr9/vision-aided-gan
 
 ### Download Models
 
-The pretrained stage-1 VAE and stage-2 LDM can be downloaded via [OneDrive](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/ErdRV9hCYvlBioObT1v_LZ4Bnwye3sv6p5qiVZPNhI9coQ?e=nJgp8t).
+The pretrained stage-1 VAE and stage-2 LDM can be downloaded via [OneDrive](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/EdOR7CbhyndFryaDnlexFqwBIr9XzFgdKXoLOOIagt7Ggw?e=ZzULnq).
 
 Put the downloaded checkpoints under ```checkpoints``` folder for inference. The checkpoints directory layout should be
 
@@ -195,11 +198,13 @@ bash shell_scripts/final_release/inference/sample_obajverse.sh
 
 which shall give the following result:
 
-https://github.com/NIRVANALAN/LN3Diff/assets/23359323/03ac96a1-bc23-4b24-8ca0-1325f8556c7f
+![Alt Text](assets/stage1_vae_reconstruction/reconstruction_result/stage1-vae-reconstruction.gif)
 
 The marching-cube extracted mesh can be visualized with Blender/MeshLab:
 
 <img title="a title" alt="Mesh Visualization" src="./assets/stage1_vae_reconstruction/reconstruction_result/mesh-visualization.png">
+
+The above VAE input and reconstruction outputs can be found in the [assets/stage1_vae_reconstruction](./assets/stage1_vae_reconstruction) folder.
 
 **We upload the pre-extracted vae latents at [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EnXixldDrKhDtrcuPM4vjQYBv06uY58F1mF7f7KVdZ19lQ?e=nXQNdm), which contains the correponding VAE latents (with shape 32x32x12) of 76K G-buffer Objaverse objects. Feel free to use them in your own task.**
 
