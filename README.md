@@ -98,24 +98,25 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :mega: Updates
 
-[08/2024] We have released the new 3D VAE trained on G-Objaverse full sets, and the corresponding DiT-based T23D and I23D model, trained with flow-matching. Please see the samples below.
+[08/2024] We have released the new 3D VAE trained on G-Objaverse full sets, and the corresponding DiT-based T23D and I23D model, trained with flow-matching. Please check the samples below.
 
 [06/2024] LN3Diff got accepted to ECCV 2024 :partying_face:! 
 
-[03/2024] Initial release.
-
 [04/2024] Inference and training codes on Objaverse, ShapeNet and FFHQ are released, including pre-trained model and training dataset.
+
+[03/2024] Initial code release.
 
 
 ## :dromedary_camel: TODO
 
-- [x] Release the new T23D and I23D DiT model trained with 180K G-Objaverse instances (Aug 2024).
+- [ ] Add Gradio demo.
+- [x] Release the new I23D flow-matching-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
+- [x] Release the new T23D DDPM-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
 - [x] Release the new 3D VAE trained with 180K G-Objaverse instances (July 2024).
 - [x] Release DiT-based, flow-matching based 3D generation framework (July 2024).
 - [ ] Polish the dataset preparation and training doc.
 - [ ] add metrics evaluation scripts and samples.
 - [ ] Lint the code.
-- [ ] Add Gradio demo.
 - [x] Release the inference and training code (Apr 2024).
 - [x] Release the pre-trained checkpoints of ShapeNet and FFHQ (Apr 2024).
 - [x] Release the pre-trained checkpoints of T23D Objaverse model trained with 30K+ instances dataset (Apr 2024).
@@ -137,7 +138,7 @@ If you find our work useful for your research, please consider citing the paper:
 ## :desktop_computer: Requirements
 
 NVIDIA GPUs are required for this project.
-We conduct all the training on NVIDIA V100-32GiB (ShapeNet, FFHQ) and NVIDIA A100-80GiB (Objaverse). 
+We conduct all the training on NVIDIA V100-32GiB (ShapeNet, FFHQ) and NVIDIA A100-80GiB (G-Objaverse). 
 We have test the inference codes on NVIDIA V100.
 We recommend using anaconda to manage the python environments.
 
@@ -145,7 +146,7 @@ The environment can be created via ```conda env create -f environment_ln3diff.ym
 If you want to reuse your own PyTorch environment, install the following packages in your environment:
 
 ```
-# first, check whether you have installed pytorch (>=2.0) and xformer.
+# first, check whether you have installed pytorch (>=2.0) and xformers.
 conda install -c conda-forge openexr-python git
 pip install openexr lpips imageio kornia opencv-python tensorboard tqdm timm ffmpeg einops beartype imageio[ffmpeg] blobfile ninja lmdb webdataset opencv-python click torchdiffeq transformers
 pip install git+https://github.com/nupurkmr9/vision-aided-gan
@@ -160,18 +161,20 @@ The pretrained stage-1 VAE and stage-2 LDM can be downloaded via [OneDrive](http
 Put the downloaded checkpoints under ```checkpoints``` folder for inference. The checkpoints directory layout should be
 
     checkpoints
-    ├── ffhq
-    │         └── model_joint_denoise_rec_model1580000.pt
     ├── objaverse
-    │        ├── model_rec1680000.pt
-    │        └── model_joint_denoise_rec_model2310000.pt
+    │     ├── model_rec1890000.pt # DiT/L-based 3D VAE 
+    │     └── objaverse-dit
+    │           └── t23d/model_joint_denoise_rec_model3820000.pt # 
+    │           └── i23d/model_joint_denoise_rec_model2990000.pt # 
     ├── shapenet
-    │        └── car
-    │                 └── model_joint_denoise_rec_model1580000.pt
-    │        └── chair
-    │                 └── model_joint_denoise_rec_model2030000.pt
-    │        └── plane
-    │                 └── model_joint_denoise_rec_model770000.pt
+    │     └── car
+    │           └── model_joint_denoise_rec_model1580000.pt
+    │     └── chair
+    │           └── model_joint_denoise_rec_model2030000.pt
+    │     └── plane
+    │           └── model_joint_denoise_rec_model770000.pt
+    ├── ffhq
+    │     └── objaverse-vae/model_joint_denoise_rec_model1580000.pt
     └── ...
     
 
@@ -206,25 +209,123 @@ The marching-cube extracted mesh can be visualized with Blender/MeshLab:
 
 The above VAE input and reconstruction outputs can be found in the [assets/stage1_vae_reconstruction](./assets/stage1_vae_reconstruction) folder.
 
-**We upload the pre-extracted vae latents at [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EnXixldDrKhDtrcuPM4vjQYBv06uY58F1mF7f7KVdZ19lQ?e=nXQNdm), which contains the correponding VAE latents (with shape 32x32x12) of 76K G-buffer Objaverse objects. Feel free to use them in your own task.**
+**We upload the pre-extracted vae latents [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/Ef_7iMZRQT5Bl5YI0hHabQ0B_Y8INDDuaq78gOJaQSPiqg?e=Ef3rXK), which contains the correponding VAE latents (with shape 32x32x12) of 176K G-buffer Objaverse objects. Feel free to use them in your own task.**
 
 For more G-buffer Objaverse examples, download the [demo data](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EoyzVJbMyBhLoKFJbbsq6bYBi1paLwQxIDjTkO1KjI4b1g?e=sJc3rQ).
 
 
-#### Stage-2 Text-to-3D
+## (New) Inference: (Single) Image-to-3D
 
-We train 3D latent diffusion model on top of the stage-1 extracted latents. 
-For the following bash inference file, to extract mesh from the generated tri-plane, set ```--export_mesh True```. To change the text prompt, set the ```prompt``` variable. For unconditional sampling, set the cfg guidance ```unconditional_guidance_scale=0```. Feel free to tune the cfg guidance scale to trade off diversity and fidelity. 
+We train a single-image-conditioned DiT-L/2 on the extracted VAE latents using [flow-matching](https://github.com/willisma/SiT]) framework, for more controllable 3D generation. To inference the results, please run 
+
+```bash
+bash shell_scripts/final_release/inference/sample_obajverse_i23d_dit.sh
+```
+
+Which reconstructs the 3D assets given input images from ```assets/i23d_examples/for_demo_inference```. The input images are borrowed from [InstantMesh](https://github.com/TencentARC/InstantMesh). The model outputs are shown below (input in the next row.):
+
+<table>
+<tr></tr>
+<tr>
+    <td>
+        <img src="assets/i23d/single-img-cond/genshin-house.gif">
+    </td>
+    <td>
+        <img src="assets/i23d/single-img-cond/chest.gif">
+    </td>
+    <td>
+        <img src="assets/i23d/single-img-cond/flower.gif">
+    </td>
+    <td>
+        <img src="assets/i23d/single-img-cond/robot.gif">
+    </td>
+    <td>
+        <img src="assets/i23d/single-img-cond/birthday-cake.gif">
+    </td>
+    <!-- <td>
+        <img src="assets/i23d/single-img-cond/birthday-cake.gif">
+    </td> -->
+</tr>
+
+To run 3D reconstruction with your own data, just change the ```$eval_path``` in the above bash file. E.g., change it to ```eval_path=./assets/i23d_examples/instant_mesh_samples``` will do 3D reconstruction on more real images from InstantMesh.
+Also, tuning the cfg through ```$unconditional_guidance_scale``` will balance the generation fidelity and diversity.
+
+
+<tr>
+    <td align='center' width='20%'>
+        <img src="assets/i23d_examples/for_demo_inference/genshin_building-input.png">
+    </td>
+    <td align='center' width='20%'>
+        <img src="assets/i23d_examples/for_demo_inference/teasure_chest-input.png">
+    </td>
+    <td align='center' width='20%'>
+        <img src="assets/i23d_examples/instant_mesh_samples/plant-input.png">
+    </td>
+    <td align='center' width='20%'>
+        <img src="assets/i23d_examples/instant_mesh_samples/robot-input.png">
+    </td>
+    <td align='center' width='20%'>
+        <img src="assets/i23d_examples/instant_mesh_samples/cake-input.png">
+    </td>
+    <!-- <td align='center' width='20%'>
+        <img src="assets/i23d_examples/for_demo_inference/sword-input.png">
+    </td> -->
+</tr>
+<tr></tr>
+</table>
+
+
+
+## Inference: Text-to-3D
+
+We train text-conditioned 3D latent diffusion model on top of the stage-1 extracted latents. 
+For the following bash inference file, to extract textured mesh from the generated tri-plane, set ```--save_img True```. To change the text prompt, set the ```prompt``` variable. For unconditional sampling, set the cfg guidance ```unconditional_guidance_scale=0```. Feel free to tune the cfg guidance scale to trade off diversity and fidelity. 
 
 Note that the diffusion sampling batch size is set to ```4```, which costs around 16GiB VRAM. The mesh extraction of a single instance costs 24GiB VRAM.
 
-For text-to-3D on Objaverse, run
+### text-to-3D on Objaverse
 
 ```bash
-bash shell_scripts/final_release/inference/sample_obajverse.sh
+bash shell_scripts/final_release/inference/sample_obajverse_t23d_dit.sh
 ```
+which shall reproduce the results shown in the Fig.5 in our paper, using the same text prompts. The results may slightly differ due to random seed used, but the quality are the same. Some output samples as the following:
 
-For text-to-3D on ShapeNet, run one of the following commands (which conducts T23D on car, chair and plane.):
+<table>
+<tr></tr>
+<tr>
+    <td>
+        <img src="assets/t23d/dit-l2/the-eiffel-tower.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/stone-waterfall-with-wooden-shed.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/a-plate-of-sushi.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/wooden-chest-with-golden-trim.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/a-blue-plastic-chair.gif">
+    </td>
+</tr>
+
+
+<tr>
+    <td align='center' width='20%'>The eiffel tower.</td>
+    <td align='center' width='20%'>A stone waterfall with wooden shed.</td>
+    <td align='center' width='20%'>A plate of sushi</td>
+    <td align='center' width='20%'>A wooden chest with golden trim</td>
+    <td align='center' width='20%'>A blue plastic chair.</td>
+</tr>
+<tr></tr>
+</table>
+
+Note that the text prompts are directly hard-coded in the ```scripts/vit_triplane_diffusion_sample_objaverse.py```.
+
+### text-to-3D on ShapeNet
+
+For text-to-3D on ShapeNet, run one of the following commands (which conducts T23D on car, chair and plane.)
 ```bash
 bash shell_scripts/final_release/inference/sample_shapenet_car_t23d.sh
 ```
@@ -237,6 +338,10 @@ bash shell_scripts/final_release/inference/sample_shapenet_chair_t23d.sh
 bash shell_scripts/final_release/inference/sample_shapenet_plane_t23d.sh
 ```
 
+The output samples for FID, COV/MMD calculation are uploaded [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/Euc7VaM3SH9EmaJuwC0dG9cBWgyLQY6gsiogGMO4NB-ebA?e=fGh2Rv), which shall reproduce the quantitative results in Tab. 1 in the paper.
+
+
+### text-to-3D on FFHQ
 For text-to-3D on FFHQ, run 
 
 ```bash

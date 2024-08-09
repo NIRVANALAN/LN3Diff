@@ -75,8 +75,10 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
---resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/mv/plucker/normalize-cam-noclip-v6-augc/gpu7-batch12-lr1e-4-perspectiveaug/model_joint_denoise_rec_model2550000.pt \
+ --resume_checkpoint /cpfs01/user/lanyushi.p/logs/nips24/LSGM/t23d/FM/9cls/i23d/mv/plucker/normalize-cam-noclip-v6-augc/gpu7-batch10-lr1e-4-perspectiveaug-lowaug/model_joint_denoise_rec_model2925000.pt \
  "
+
+# /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/mv/plucker/normalize-cam-noclip-v6-augc/gpu7-batch12-lr1e-4-perspectiveaug/model_joint_denoise_rec_model2550000.pt \
 
 # /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-L2-pixart-lognorm-rmsnorm-layernorm_before_pooled/gpu7-batch40-lr1e-4-bf16-qknorm-ctd3/model_joint_denoise_rec_model2990000.pt \
 
@@ -148,7 +150,8 @@ DDIM_FLAGS="
 
 # logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart-aug-0.0
 # logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart-aug-0.2-1.9
-logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart-aug-0.2-2.0
+# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart-aug-0.2-2.0
+logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/chest/lowaug
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -177,7 +180,7 @@ export OMP_NUM_THREADS=12
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_NCCL_IB_GID_INDEX=3 # https://github.com/huggingface/accelerate/issues/314#issuecomment-1821973930
 export OPENCV_IO_ENABLE_OPENEXR=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=2
 
 torchrun --nproc_per_node=$NUM_GPUS \
   --nnodes 1 \

@@ -10,18 +10,11 @@ patch_size=14
 batch_size=1
 microbatch=${batch_size}
 
-# num_samples=$((50/${batch_size})) # follow ssdnerf and functa
-# num_samples=4 # how many samples per prompt
 num_samples=4 # how many samples per prompt
 cfg_dropout_prob=0.1 # SD config
 num_workers=0
 
-# data_dir='./assets/stage1_vae_reconstruction/Objaverse'
-# eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/examples
-# eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/output/instant-mesh-large/images
-# eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/test_dir
-eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/output/instant-mesh-large/images
-# eval_path='logs/examples'
+eval_path='./assets/i23d_examples/for_demo_inference'
 
 DATASET_FLAGS="
  --data_dir "NONE" \
@@ -72,8 +65,9 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
- --resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-L2-pixart-lognorm-rmsnorm-layernorm_before_pooled/gpu7-batch40-lr1e-4-bf16-qknorm-ctd3/model_joint_denoise_rec_model2990000.pt \
+ --resume_checkpoint checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.pt \
  "
+#  --resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-L2-pixart-lognorm-rmsnorm-layernorm_before_pooled/gpu7-batch40-lr1e-4-bf16-qknorm-ctd3/model_joint_denoise_rec_model2990000.pt \
 
 
 DDPM_MODEL_FLAGS="
@@ -110,10 +104,7 @@ DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 --roll_out True \
 "
 
-
-
-# logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/
-logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/all_samples
+logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/sample_for_demo
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -128,12 +119,9 @@ SR_TRAIN_FLAGS_v1_2XC="
 --triplane_in_chans 32 \
 --decoder_output_dim 3 \
 "
-# --resume_checkpoint /mnt/lustre/yslan/logs/nips23/LSGM/ssd/chair/scaling/entropy/kl0_ema0.9999_vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_weightingv0_lsgm_unfreezeD_0.01_gradclip_nocesquare_clipH@0_noallAMP_dataset500/model_joint_denoise_rec_model0910000.pt \
 
 
-# unconditional_guidance_scale=6.5
-# unconditional_guidance_scale=4
-unconditional_guidance_scale=5
+unconditional_guidance_scale=4
 
 DDIM_FLAGS="
 --unconditional_guidance_scale ${unconditional_guidance_scale} \

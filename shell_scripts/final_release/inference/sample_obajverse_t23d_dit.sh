@@ -11,7 +11,7 @@ patch_size=14
 batch_size=4 # BS=256 is enough
 microbatch=${batch_size}
 
-num_samples=$((100/${batch_size})) # follow ssdnerf and functa
+num_samples=32
 
 cfg_dropout_prob=0.1 # SD config
 
@@ -40,8 +40,7 @@ scale_clip_encoding=1
 
 triplane_scaling_divider=0.96806
 
-# prompt="A blue plastic chair."
-prompt="A sailboat with mast."
+prompt="" # already denoted in the python file.
 
 # * above the best lr config
 
@@ -78,7 +77,7 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
- --resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/sgm-engine/9cls/dit-L2/gpu7-batch32-lr1e-4-bf16-ctd/model_joint_denoise_rec_model3820000.pt \
+ --resume_checkpoint checkpoints/objaverse/objaverse-dit/t23d/model_joint_denoise_rec_model3820000.pt \
  "
 
 
@@ -104,7 +103,7 @@ DDPM_MODEL_FLAGS="
 # ! diffusion steps and noise schedule not used, since the continuous diffusion is adopted.
 DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 --use_kl False \
---use_amp False \
+--use_amp True \
 --triplane_scaling_divider ${triplane_scaling_divider} \
 --trainer_name sgm_legacy \
 --mixed_prediction False \
@@ -134,7 +133,9 @@ DDIM_FLAGS="
 # logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/
 # logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples
 # logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres
-logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres_seed41
+# logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres_seed41
+# logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres_seed41_reproduce
+logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres_seed41_reproduce_sampleonly
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -188,7 +189,7 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --eval_interval 5000 \
  --decomposed True \
  --logdir $logdir \
- --cfg objverse_tuneray_aug_resolution_128_128_auto \
+ --cfg objverse_tuneray_aug_resolution_64_64_auto \
  --patch_size ${patch_size} \
  --eval_batch_size 1 \
  ${LR_FLAGS} \
