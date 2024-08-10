@@ -209,17 +209,20 @@ class TrainLoopDiffusionWithRec(TrainLoop):
             vtx, faces = mcubes.marching_cubes(
                 grid_out['sigma'].float().squeeze(0).squeeze(-1).cpu().numpy(),
                 mesh_thres)
+            # st()
             vtx = vtx / (mesh_size - 1) * 2 - 1
+            vtx = vtx * 0.45 # g-objaverse scale
 
-            # vtx_tensor = th.tensor(vtx, dtype=th.float32, device=dist_util.dev()).unsqueeze(0)
-            # vtx_colors = self.model.synthesizer.forward_points(planes, vtx_tensor)['rgb'].squeeze(0).cpu().numpy()  # (0, 1)
-            # vtx_colors = (vtx_colors * 255).astype(np.uint8)
+            vtx_tensor = th.tensor(vtx, dtype=th.float32, device=dist_util.dev()).unsqueeze(0)
+            vtx_colors = rec_model.decoder.forward_points(ddpm_latent['latent_after_vit'], vtx_tensor)['rgb'].float().squeeze(0).cpu().numpy()  # (0, 1)
+            vtx_colors = (vtx_colors.clip(0,1) * 255).astype(np.uint8)
 
-            # mesh = trimesh.Trimesh(vertices=vtx, faces=faces, vertex_colors=vtx_colors)
-            mesh = trimesh.Trimesh(
-                vertices=vtx,
-                faces=faces,
-            )
+            mesh = trimesh.Trimesh(vertices=vtx, faces=faces, vertex_colors=vtx_colors)
+            # st()
+            # mesh = trimesh.Trimesh(
+            #     vertices=vtx,
+            #     faces=faces,
+            # )
 
             mesh_dump_path = os.path.join(dump_path, f'{name_prefix}.ply')
             mesh.export(mesh_dump_path, 'ply')
@@ -274,9 +277,7 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                 k: v.to(dist_util.dev()) if isinstance(v, th.Tensor) else v
                 for k, v in batch.items()
             }
-            # micro = {'c': batch['c'].to(dist_util.dev()).repeat_interleave(batch_size, 0)}
 
-            # all_pred = []
             pred = rec_model(
                 img=None,
                 c=micro['c'],

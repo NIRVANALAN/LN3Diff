@@ -1,7 +1,7 @@
 <div align="center">
 
 <h1>
-LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
+LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation (ECCV 2024)
 </h1>
 
 <div>
@@ -39,11 +39,11 @@ LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 <br>
 <!-- <h4> -->
 <strong>
-LN3Diff is a feedforward 3D diffusion model that creates high-quality 3D object mesh from text within 8 V100-SECONDS.
+LN3Diff (Latent Neural Fields 3D Diffusion) is a generic, feedforward 3D LDM framework that creates high-quality 3D object mesh from text within SECONDS.
 </strong>
 <!-- </h4> -->
 
-<table>
+<!-- <table>
 <tr></tr>
 <tr>
     <td>
@@ -64,11 +64,43 @@ LN3Diff is a feedforward 3D diffusion model that creates high-quality 3D object 
 </tr>
 
 
+
 <tr>
     <td align='center' width='20%'>A standing hund.</td>
     <td align='center' width='20%'>An UFO space aircraft.</td>
     <td align='center' width='20%'>A sailboat with mast.</td>
     <td align='center' width='20%'>An 18th century cannon.</td>
+    <td align='center' width='20%'>A blue plastic chair.</td>
+</tr>
+<tr></tr>
+</table> -->
+
+<table>
+<tr></tr>
+<tr>
+    <td>
+        <img src="assets/t23d/dit-l2/the-eiffel-tower.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/stone-waterfall-with-wooden-shed.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/a-plate-of-sushi.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/wooden-chest-with-golden-trim.gif">
+    </td>
+    <td>
+        <img src="assets/t23d/dit-l2/a-blue-plastic-chair.gif">
+    </td>
+</tr>
+
+
+<tr>
+    <td align='center' width='20%'>The eiffel tower.</td>
+    <td align='center' width='20%'>A stone waterfall with wooden shed.</td>
+    <td align='center' width='20%'>A plate of sushi</td>
+    <td align='center' width='20%'>A wooden chest with golden trim</td>
     <td align='center' width='20%'>A blue plastic chair.</td>
 </tr>
 <tr></tr>
@@ -183,37 +215,6 @@ Put the downloaded checkpoints under ```checkpoints``` folder for inference. The
 
 <strong>Note that to extract the mesh, 24GiB VRAM is required.</strong>
 
-### Training
-
-Preparation:
-
-The Cap3D captions can be downloaded from [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/EdzVtlT_eUpItE73osqE1UEBSNmC2wfQ0YimmMcLcRhpqw?e=wMHtvx). 
-Please put under ```'./datasets/text_captions_cap3d.json'```
-
-
-#### Stage-1 VAE 3D reconstruction
-
-For (Objaverse) stage-1 VAE 3D reconstruction and extract VAE latents for diffusion learning, please run
-
-```bash
-bash shell_scripts/final_release/inference/sample_obajverse.sh
-```
-
-which shall give the following result:
-
-![Alt Text](assets/stage1_vae_reconstruction/reconstruction_result/stage1-vae-reconstruction.gif)
-
-The marching-cube extracted mesh can be visualized with Blender/MeshLab:
-
-<img title="a title" alt="Mesh Visualization" src="./assets/stage1_vae_reconstruction/reconstruction_result/mesh-visualization.png">
-
-The above VAE input and reconstruction outputs can be found in the [assets/stage1_vae_reconstruction](./assets/stage1_vae_reconstruction) folder.
-
-**We upload the pre-extracted vae latents [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/Ef_7iMZRQT5Bl5YI0hHabQ0B_Y8INDDuaq78gOJaQSPiqg?e=Ef3rXK), which contains the correponding VAE latents (with shape 32x32x12) of 176K G-buffer Objaverse objects. Feel free to use them in your own task.**
-
-For more G-buffer Objaverse examples, download the [demo data](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EoyzVJbMyBhLoKFJbbsq6bYBi1paLwQxIDjTkO1KjI4b1g?e=sJc3rQ).
-
-
 ## (New) Inference: (Single) Image-to-3D
 
 We train a single-image-conditioned DiT-L/2 on the extracted VAE latents using [flow-matching](https://github.com/willisma/SiT]) framework, for more controllable 3D generation. To inference the results, please run 
@@ -274,7 +275,7 @@ Also, tuning the cfg through ```$unconditional_guidance_scale``` will balance th
 <tr></tr>
 </table>
 
-
+We have uploaded the inference results on some common I23D images (from InstantMesh) to [onedrive](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/EeMmXvoJ0khNjzWLgMBEgMMB_xb9r9ciRkDgjnQCDJqLSg?e=rk9iGs), including the condition images, rendered images/videos and the corresponding extracted textured mesh (with 4 different seeds, and cfg=5.0). Feel free to use them for comparison in your own method.
 
 ## Inference: Text-to-3D
 
@@ -288,38 +289,8 @@ Note that the diffusion sampling batch size is set to ```4```, which costs aroun
 ```bash
 bash shell_scripts/final_release/inference/sample_obajverse_t23d_dit.sh
 ```
-which shall reproduce the results shown in the Fig.5 in our paper, using the same text prompts. The results may slightly differ due to random seed used, but the quality are the same. Some output samples as the following:
+which shall reproduce the results shown in the Fig.5 in our paper, using the same text prompts. The results may slightly differ due to random seed used, but the quality are the same. Some output samples are shown in the top figure.
 
-<table>
-<tr></tr>
-<tr>
-    <td>
-        <img src="assets/t23d/dit-l2/the-eiffel-tower.gif">
-    </td>
-    <td>
-        <img src="assets/t23d/dit-l2/stone-waterfall-with-wooden-shed.gif">
-    </td>
-    <td>
-        <img src="assets/t23d/dit-l2/a-plate-of-sushi.gif">
-    </td>
-    <td>
-        <img src="assets/t23d/dit-l2/wooden-chest-with-golden-trim.gif">
-    </td>
-    <td>
-        <img src="assets/t23d/dit-l2/a-blue-plastic-chair.gif">
-    </td>
-</tr>
-
-
-<tr>
-    <td align='center' width='20%'>The eiffel tower.</td>
-    <td align='center' width='20%'>A stone waterfall with wooden shed.</td>
-    <td align='center' width='20%'>A plate of sushi</td>
-    <td align='center' width='20%'>A wooden chest with golden trim</td>
-    <td align='center' width='20%'>A blue plastic chair.</td>
-</tr>
-<tr></tr>
-</table>
 
 Note that the text prompts are directly hard-coded in the ```scripts/vit_triplane_diffusion_sample_objaverse.py```.
 
@@ -348,27 +319,72 @@ For text-to-3D on FFHQ, run
 bash shell_scripts/final_release/inference/sample_ffhq_t23d.sh
 ```
 
+#### Stage-1 VAE 3D reconstruction
+
+For (Objaverse) stage-1 VAE 3D reconstruction and extract VAE latents for diffusion learning, please run
+
+```bash
+bash shell_scripts/final_release/inference/sample_obajverse.sh
+```
+
+which shall give the following result:
+
+![Alt Text](assets/stage1_vae_reconstruction/reconstruction_result/stage1-vae-reconstruction.gif)
+
+The marching-cube extracted mesh can be visualized with Blender/MeshLab:
+
+<img title="a title" alt="Mesh Visualization" src="./assets/stage1_vae_reconstruction/reconstruction_result/mesh-visualization.png">
+
+The above VAE input and reconstruction outputs can be found in the [assets/stage1_vae_reconstruction](./assets/stage1_vae_reconstruction) folder.
+
+**!! We upload the pre-extracted vae latents [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/Ef_7iMZRQT5Bl5YI0hHabQ0B_Y8INDDuaq78gOJaQSPiqg?e=Ef3rXK), which contains the correponding VAE latents (with shape 32x32x12) of 176K G-buffer Objaverse objects. Feel free to use them in your own task.**
+
+For more G-buffer Objaverse examples, download the [demo data](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EoyzVJbMyBhLoKFJbbsq6bYBi1paLwQxIDjTkO1KjI4b1g?e=sJc3rQ).
+
+
+
 
 ## :running_woman: Training
 
-### Dataset
 
-For Objaverse, we use the rendering provided by [G-buffer Objaverse](https://aigc3d.github.io/gobjaverse/). A demo subset for stage-1 VAE reconstruction can be downloaded from [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/Eb6LX2x-EgJLpiHbhRxsN9ABnEaSyjG-tsVBcUr_dQ5dnQ?e=JXWQo1). Note that for Objaverse training, we pre-process the raw data into [wds-dataset](https://github.com/webdataset/webdataset) shards for fast and flexible loading. The sample shard data can be found in [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/ErtZQgnEH5ZItDqdUaiVbJgBe4nhZveJemQRqDW6Xwp7Zg?e=Zqt6Ss).
+### For training stage-1 VAE
+
+For Objaverse, we use the rendering provided by [G-buffer Objaverse](https://aigc3d.github.io/gobjaverse/). 
+We process the data into multi-view chunks for faster loading, and the pre-processed data (176K instances) can be downloaded [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EtOUTVZNtGxCg3aJnCDkqZcBmH_-OxCGLQBDwqq9ny5Ing?e=BUHiZi). Noted that you need 450 GiB storage to download the dataset.
+
+<!-- A demo subset for stage-1 VAE reconstruction can be downloaded from [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/Eb6LX2x-EgJLpiHbhRxsN9ABnEaSyjG-tsVBcUr_dQ5dnQ?e=JXWQo1). Note that for Objaverse training, we pre-process the raw data into [wds-dataset](https://github.com/webdataset/webdataset) shards for fast and flexible loading. The sample shard data can be found in [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/ErtZQgnEH5ZItDqdUaiVbJgBe4nhZveJemQRqDW6Xwp7Zg?e=Zqt6Ss). -->
 
 For ShapeNet, we render our own data with foreground mask for training, which can be downloaded from [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EijBXIC_bUNOo0L3wnJKRqoBCqVnhhT_BReYRc1tc_0lrA?e=VQwWOZ). For training, we convert the raw data to LMDB for faster data loading. The pre-processed LMDB file can be downloaded from [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/Ev7L8Als8K9JtLtj1G23Cc0BTNDbhCQPadxNLLVS7mV2FQ?e=C5woyE).
 
 
 For FFHQ, we use the pre-processed dataset from [EG3D](https://github.com/NVlabs/eg3d) and compress it into LMDB, which can also be found in the onedrive link above.
 
+### For training stage-2 LDM
+
+#### Pre-extracted latents
+
+We have uploaded the pre-extracted vae latents [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/Ef_7iMZRQT5Bl5YI0hHabQ0B_Y8INDDuaq78gOJaQSPiqg?e=Ef3rXK), which contains the correponding VAE latents (with shape 32x32x3x4) of 176K G-buffer Objaverse objects. Feel free to use them in the LDM training.
+
+#### text-to-3D
+The Cap3D captions can be downloaded from [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/EdzVtlT_eUpItE73osqE1UEBSNmC2wfQ0YimmMcLcRhpqw?e=wMHtvx). 
+Please put under ```'./datasets/text_captions_cap3d.json'```
+
+#### image-to-3D
+We directly use G-Objaverse rendering images for training, and you may need to download their data for this experiments.
+
 
 ### Training Commands
 
 Coming soon.
 
+## More discussions of the proposed method
+Compared to existing 3D generation framework such as SDS-based ([DreamFusion](https://dreamfusion3d.github.io/)), mulit-view generation-based ([MVDream](https://arxiv.org/abs/2308.16512), [Zero123++](https://github.com/SUDO-AI-3D/zero123plus), [Instant3D](https://instant-3d.github.io/)) and feedforward 3D reconstruction-based ([LRM](https://yiconghong.me/LRM/), [InstantMesh](https://github.com/TencentARC/InstantMesh), [LGM](https://github.com/3DTopia/LGM)), LN3Diff is an origin 3D Diffusion framework. 
+Like 2D/Video AIGC pipeline, LN3Diff first trains a 3D-VAE and then conduct LDM training (text/image conditioned) on the learned latent space. Some related methods from the industry ([Shape-E](https://github.com/openai/shap-e), [CLAY](https://github.com/CLAY-3D/OpenCLAY), [Meta 3D Gen](https://arxiv.org/abs/2303.05371)) also follow the same paradigm.
+Though currently the performance of the origin 3D LDM's works are overall inferior to reconstruction-based methods, we believe the proposed method has much potential and scales better with more data and compute resources, and may yield better 3D editing performance due to its compatability with diffusion model.
 
 ## :newspaper_roll:  License
 
-Distributed under the S-Lab License. See `LICENSE` for more information.
+Distributed under the NTU S-Lab License. See `LICENSE` for more information.
 
 
 ## Contact

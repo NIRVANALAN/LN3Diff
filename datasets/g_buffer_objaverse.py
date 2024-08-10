@@ -1211,8 +1211,8 @@ class RealMVDataset(Dataset):
         ]
         # all_fname = [name for name in all_fname if '-input' in name ]
         # all_fname = [name for name in all_fname if 'sorting_board-input' in name ]
-        # all_fname = [name for name in all_fname if 'teasure_chest-input' in name ]
-        all_fname = [name for name in all_fname if 'bubble_mart_blue-input' in name ]
+        all_fname = [name for name in all_fname if 'teasure_chest-input' in name ]
+        # all_fname = [name for name in all_fname if 'bubble_mart_blue-input' in name ]
         # all_fname = [name for name in all_fname if 'chair_comfort-input' in name ]
         self.rgb_list += ([
             os.path.join(self.file_path, fname) for fname in all_fname
@@ -1242,7 +1242,7 @@ class RealMVDataset(Dataset):
         elevations = np.array([20, -10, 20, -10, 20, -10]).astype(float)
 
         # zero123pp_pose, _ = generate_input_camera(1.6, [[elevations[i], azimuths[i]] for i in range(6)], fov=30)
-        zero123pp_pose, _ = generate_input_camera(2.0, [[elevations[i], azimuths[i]] for i in range(6)], fov=30)
+        zero123pp_pose, _ = generate_input_camera(1.8, [[elevations[i], azimuths[i]] for i in range(6)], fov=30)
         K = torch.Tensor([1.3889, 0.0000, 0.5000, 0.0000, 1.3889, 0.5000, 0.0000, 0.0000, 0.0039]).to(zero123pp_pose) # keeps the same
         # st()
         zero123pp_pose = torch.cat([zero123pp_pose.reshape(6,-1), K.unsqueeze(0).repeat(6,1)], dim=-1)
@@ -1262,7 +1262,10 @@ class RealMVDataset(Dataset):
         # self.eval_camera = torch.cat([torch.zeros_like(eval_camera[0:1]),eval_camera], 0) # first c not used as condition here, just placeholder
 
         # # * normalize here
-        self.eval_camera = self.normalize_camera(eval_camera, eval_camera[0:1]) # the first img is not used. 
+        # self.eval_camera = self.normalize_camera(eval_camera, eval_camera[0:1]) # the first img is not used. 
+
+        # ! no normalization required
+        self.eval_camera = eval_camera
 
         # st()
         # self.eval_camera = self.eval_camera + np.random.randn(*self.eval_camera.shape) * 0.04 - 0.02

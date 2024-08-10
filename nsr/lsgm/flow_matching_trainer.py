@@ -558,6 +558,7 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
         num_samples=1,
         num_instances=1,
         unconditional_guidance_scale=4.0, # default value in neural ode
+        export_mesh=False,
         **kwargs,
     ):
         # ! slightly modified for new API. combined with
@@ -652,8 +653,8 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
                         name_prefix=name_prefix,
                         save_img=save_img,
                         render_reference=batch,
-                    export_mesh=save_img, 
-                    render_all=True)
+                        export_mesh=export_mesh, 
+                        render_all=True)
 
         if self.cond_key == 'caption':
             batch_c = {self.cond_key: prompt}

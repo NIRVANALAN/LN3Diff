@@ -176,25 +176,25 @@ def main(args):
             json.dump(vars(args), f, indent=2)
 
         # ! use pre-saved camera pose form g-buffer objaverse
-        # camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[:]
-        # camera = th.load('assets/render_cameras_1.5.pt', map_location=dist_util.dev())[0, ::4]
-        camera = th.load('assets/elev-traj.pt', map_location=dist_util.dev())
-        train_c = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[0:1]
+        # camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[0:25]
+        camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[:]
 
-        camera = th.cat([camera.reshape(36,16),train_c.repeat(36,1)[:,16:]], -1)
+        # camera = th.cat([camera.reshape(36,16),train_c.repeat(36,1)[:,16:]], -1)
 
         # ! debug cfg
 
         # for unconditional_guidance_scale in [1,2,3,4,5,6,6.5,7]:
         # for unconditional_guidance_scale in [4,5,6,7,8,9,10]:
 
-        for prompt in [
-            'The Eiffel tower.', 
-            # 'a stone water well with a wooden shed.',
-            # 'A wooden chest with golden trim',
-            # 'A plate of sushi.', 
+        all_prompts_available = [
+            # prompts used in the paper:
+            'The Eiffel tower.',  # 0-3
+            'a stone water well with a wooden shed.', # 7 9 15 19 23 24 28
+            'A wooden chest with golden trim', # 3 5 6 7
+            'A plate of sushi.',  # 0 3 7 11 16
+            'A blue platic chair', # 0 1 2 3
+            # Prompt NOT USED (From Volume diffusion):
             # 'A wooden worktable', 
-
             # 'An engineer', 
             # 'A bowl of food.', 
             # "a voxelized dog",
@@ -220,7 +220,17 @@ def main(args):
             # 'A bird with a red hat',
             # 'A happy pikachu.', 
             # from volumeDiffusion
-            ]:
+        ]
+
+        prompts_and_seed_to_render = {
+            'The Eiffel tower.': np.array([20, 19, 18, 31, 26, 25, 22]),  # 0-3
+            'a stone water well with a wooden shed.': np.array([7, 9, 15, 19, 23, 24, 28]),
+            'A wooden chest with golden trim': np.array([3, 5, 6, 7]), 
+            'A plate of sushi.': np.array([0, 3, 7, 11, 16]), 
+            'A blue platic chair': np.array([0, 1, 2, 3]),
+        }
+
+        for prompt, seeds in prompts_and_seed_to_render.items():
 
             training_loop_class.eval_cldm(
                     # prompt=args.prompt,
@@ -235,6 +245,7 @@ def main(args):
                     num_instances=args.num_instances,
                     num_samples=args.num_samples,
                     export_mesh=args.export_mesh, 
+                    idx_to_render=seeds,
                 )
 
 

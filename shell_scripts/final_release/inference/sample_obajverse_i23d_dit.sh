@@ -104,7 +104,7 @@ DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 --roll_out True \
 "
 
-logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/sample_for_demo
+logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/sample_for_demo2
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -190,7 +190,8 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --snr-type lognorm \
  --use_eos_feature False \
  --load_real True \
- --save_img True \
+ --save_img False \
+ --export_mesh True \
  --use_wds False \
 
 #  done

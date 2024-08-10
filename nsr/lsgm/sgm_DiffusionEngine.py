@@ -389,13 +389,20 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
         uc: Union[Dict, None] = None,
         batch_size: int = 16,
         shape: Union[None, Tuple, List] = None,
+        idx_to_render=None, 
         **kwargs,
     ):
-        randn = th.randn(batch_size, *shape).to(dist_util.dev())
+        randn = th.randn(batch_size, *shape).to(self.dtype).to(dist_util.dev())
 
-        denoiser = lambda input, sigma, c: self.denoiser(
-            self.model, input, sigma, c, **kwargs)
-        samples = self.sampler(denoiser, randn, cond, uc=uc)
+        if idx_to_render is not None:
+            randn = randn[idx_to_render]
+
+        with th.cuda.amp.autocast(dtype=self.dtype,
+                                    enabled=self.mp_trainer.use_amp):
+
+            denoiser = lambda input, sigma, c: self.denoiser(
+                self.model, input, sigma, c, **kwargs)
+            samples = self.sampler(denoiser, randn, cond, uc=uc)
 
         return samples
 
@@ -411,6 +418,7 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
         num_samples=1,
         num_instances=1,
         export_mesh=False, # TODO
+        idx_to_render=None,
     ):
         # ! slightly modified for new API. combined with
         # /cpfs01/shared/V2V/V2V_hdd/yslan/Repo/generative-models/sgm/models/diffusion.py:249 log_images()
@@ -443,31 +451,30 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
             if len(self.conditioner.embedders) > 0 else [],
         )
 
-        sampling_kwargs = {}
+        sampling_kwargs = {'idx_to_render': idx_to_render}
 
-        N = 1  # hard coded, to update
-        # N = 32  # hard coded, to update
-        # th.manual_seed(42) # fix randn seed for all prompt
+        # N = 32
         th.manual_seed(41) # fix randn seed for all prompt
+        N = num_samples
         z_shape = (
-            N,
+            num_samples,
             self.ddpm_model.in_channels if not self.ddpm_model.roll_out else
             3 * self.ddpm_model.in_channels,  # type: ignore
             self.diffusion_input_size,
             self.diffusion_input_size)
 
-        # for k in c:
-        #     if isinstance(c[k], th.Tensor):
-        #         c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
-        #                           (c, uc))
 
         for k in c:
             if isinstance(c[k], th.Tensor):
                 # c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
                 #                   (c, uc))
                 assert c[k].shape[0] == 1
-                c[k], uc[k] = map(lambda y: y[k].repeat_interleave(N, 0).to(dist_util.dev()),
-                                  (c, uc)) # support bs>1 sampling given a condition
+                if idx_to_render is not None:
+                    c[k], uc[k] = map(lambda y: y[k].repeat_interleave(idx_to_render.shape[0], 0).to(self.dtype).to(dist_util.dev()),
+                                    (c, uc)) # support bs>1 sampling given a condition
+                else: 
+                    c[k], uc[k] = map(lambda y: y[k].repeat_interleave(N, 0).to(self.dtype).to(dist_util.dev()),
+                                    (c, uc)) # support bs>1 sampling given a condition
 
         samples = self.sample(c,
                               shape=z_shape[1:],
@@ -512,6 +519,7 @@ class DiffusionEngineLSGM(TrainLoop3DDiffusionLSGM_crossattn):
                     f'{self.step + self.resume_step}{prefix}_{i}',
                     save_img=save_img,
                     render_reference=batch,
-                    export_mesh=False)
+                    export_mesh=export_mesh, 
+                    render_all=True)
 
         self.ddpm_model.train()

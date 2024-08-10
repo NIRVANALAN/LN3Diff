@@ -214,7 +214,8 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --num_frames 6 \
  --prompt "$prompt" \
  --num_samples ${num_samples} \
- --save_img True \
+ --save_img False \
+ --export_mesh True \
  --use_wds False \
 
 #  --cfg objverse_tuneray_aug_resolution_128_128_auto \
