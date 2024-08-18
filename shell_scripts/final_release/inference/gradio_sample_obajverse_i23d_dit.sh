@@ -12,19 +12,11 @@ patch_size=14
 batch_size=1
 microbatch=${batch_size}
 
-# num_samples=$((50/${batch_size})) # follow ssdnerf and functa
-num_samples=4 # how many samples per prompt
+num_samples=1 # how many samples per prompt
 cfg_dropout_prob=0.1 # SD config
 num_workers=0
 
-# data_dir='./assets/stage1_vae_reconstruction/Objaverse'
-# eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/examples
-
-eval_path=/cpfs01/user/lanyushi.p/Repo/eccv24/open-source/InstantMesh/output/instant-mesh-large/images
-
-# eval_path=/nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-XL2-MV-ampFast/gpu1-batch10-lr0-bf16-qknorm-fixinpRange-debug/inp
-
-# eval_path='logs/examples'
+eval_path='./assets/i23d_examples/for_demo_inference'
 
 DATASET_FLAGS="
  --data_dir "NONE" \
@@ -75,13 +67,12 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
- --resume_checkpoint /cpfs01/user/lanyushi.p/logs/nips24/LSGM/t23d/FM/9cls/i23d/mv/plucker/normalize-cam-noclip-v6-augc/gpu7-batch10-lr1e-4-perspectiveaug-lowaug-normalize/model_joint_denoise_rec_model3150000.pt \
+ --resume_checkpoint checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.pt \
  "
 
-# /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/mv/plucker/normalize-cam-noclip-v6-augc/gpu7-batch12-lr1e-4-perspectiveaug/model_joint_denoise_rec_model2550000.pt \
+# checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.safetensors
 
-# /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-L2-pixart-lognorm-rmsnorm-layernorm_before_pooled/gpu7-batch40-lr1e-4-bf16-qknorm-ctd3/model_joint_denoise_rec_model2990000.pt \
-
+#  --resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-L2-pixart-lognorm-rmsnorm-layernorm_before_pooled/gpu7-batch40-lr1e-4-bf16-qknorm-ctd3/model_joint_denoise_rec_model2990000.pt \
 
 
 DDPM_MODEL_FLAGS="
@@ -92,14 +83,12 @@ DDPM_MODEL_FLAGS="
 --attention_resolutions "4,2,1" \
 --use_spatial_transformer True \
 --transformer_depth 1 \
---context_dim 768 \
---pooling_ctx_dim 768 \
+--context_dim 1024 \
 "
 
 # ! diffusion steps and noise schedule not used, since the continuous diffusion is adopted.
 DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 --use_kl False \
---use_amp False \
 --triplane_scaling_divider ${triplane_scaling_divider} \
 --trainer_name flow_matching \
 --mixed_prediction False \
@@ -113,46 +102,13 @@ DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 --pred_type v \
 --predict_v True \
 --create_dit True \
---dit_model_arch DiT-PixArt-MV-L/2 \
+--dit_model_arch DiT-PixArt-L/2 \
 --train_vae False \
 --use_eos_feature False \
 --roll_out True \
 "
 
-
-# unconditional_guidance_scale=6.5
-unconditional_guidance_scale=4.0
-# unconditional_guidance_scale=1.0
-# unconditional_guidance_scale=8.0
-
-DDIM_FLAGS="
---unconditional_guidance_scale ${unconditional_guidance_scale} \
-"
-
-
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-XL2/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-XL2/c_mismatch
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-XL2/cfg=${unconditional_guidance_scale}
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-XL2/real/cfg=${unconditional_guidance_scale}
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-XL2/real-board/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-XL2/real-chest/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-XL2/real-mart/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/chair/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/chair-border0.4/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/chest-noborder/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/mart-right/
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/board/
-
-# v=6
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/chest/border0.2
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/chest/check_pose
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart
-
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart-aug-0.0
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart-aug-0.2-1.9
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/mart-aug-0.2-2.0
-# logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/chest/lowaug
-logdir=./logs/LSGM/inference/Objaverse/mv23d/dit-L2/plucker/v=6/chest/lowaug-normalize
+logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/gradio_app
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -167,7 +123,14 @@ SR_TRAIN_FLAGS_v1_2XC="
 --triplane_in_chans 32 \
 --decoder_output_dim 3 \
 "
-# --resume_checkpoint /mnt/lustre/yslan/logs/nips23/LSGM/ssd/chair/scaling/entropy/kl0_ema0.9999_vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_weightingv0_lsgm_unfreezeD_0.01_gradclip_nocesquare_clipH@0_noallAMP_dataset500/model_joint_denoise_rec_model0910000.pt \
+
+
+unconditional_guidance_scale=4
+
+DDIM_FLAGS="
+--unconditional_guidance_scale ${unconditional_guidance_scale} \
+"
+
 
 SR_TRAIN_FLAGS=${SR_TRAIN_FLAGS_v1_2XC}
 
@@ -181,12 +144,12 @@ export OMP_NUM_THREADS=12
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_NCCL_IB_GID_INDEX=3 # https://github.com/huggingface/accelerate/issues/314#issuecomment-1821973930
 export OPENCV_IO_ENABLE_OPENEXR=1
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=0
 
-torchrun --nproc_per_node=$NUM_GPUS \
+torchrun --nproc_per_node=1 \
   --nnodes 1 \
-  --rdzv-endpoint=localhost:24379 \
- scripts/vit_triplane_diffusion_sample_objaverse.py \
+  --rdzv-endpoint=localhost:19999 \
+ scripts/gradio_app.py \
  --num_workers ${num_workers} \
  --depth_lambda 0 \
  ${TRAIN_FLAGS}  \
@@ -215,7 +178,7 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --scale_clip_encoding ${scale_clip_encoding} \
  --objv_dataset True \
  --cfg_dropout_prob ${cfg_dropout_prob} \
- --cond_key img-c \
+ --cond_key img \
  --enable_mixing_normal False \
  --use_lmdb_compressed False \
  --use_lmdb False \
@@ -228,9 +191,11 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --num_samples ${num_samples} \
  --i23d True \
  --shuffle_across_cls True \
- --snr-type lognorm-mv-plucker \
+ --snr-type lognorm \
  --use_eos_feature False \
  --load_real True \
+ --save_img False \
+ --export_mesh True \
  --use_wds False \
 
 #  done

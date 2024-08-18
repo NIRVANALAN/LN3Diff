@@ -267,8 +267,8 @@ def load_eval_data(
                               interval=interval)
 
     elif load_real:
-        dataset = RealDataset(file_path,
-        # dataset = RealMVDataset(file_path,
+        # dataset = RealDataset(file_path,
+        dataset = RealMVDataset(file_path,
                               reso,
                               reso_encoder,
                               preprocess=preprocess,
@@ -1262,10 +1262,10 @@ class RealMVDataset(Dataset):
         # self.eval_camera = torch.cat([torch.zeros_like(eval_camera[0:1]),eval_camera], 0) # first c not used as condition here, just placeholder
 
         # # * normalize here
-        # self.eval_camera = self.normalize_camera(eval_camera, eval_camera[0:1]) # the first img is not used. 
+        self.eval_camera = self.normalize_camera(eval_camera, eval_camera[0:1]) # the first img is not used. 
 
-        # ! no normalization required
-        self.eval_camera = eval_camera
+        # ! if no normalization required
+        # self.eval_camera = eval_camera
 
         # st()
         # self.eval_camera = self.eval_camera + np.random.randn(*self.eval_camera.shape) * 0.04 - 0.02

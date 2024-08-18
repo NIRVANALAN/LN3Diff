@@ -18,6 +18,8 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
+from safetensors.torch import load_file
+
 from guided_diffusion.gaussian_diffusion import _extract_into_tensor
 from guided_diffusion import dist_util, logger
 from guided_diffusion.fp16_util import MixedPrecisionTrainer
@@ -43,6 +45,16 @@ from nsr.camera_utils import FOV_to_intrinsics, LookAtPoseSampler
 # use_amp = False
 # use_amp = True
 
+# Function to generate a rotation matrix for an arbitrary theta along the x-axis
+def rotation_matrix_x(theta_degrees):
+    theta = np.radians(theta_degrees)  # Convert degrees to radians
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+    
+    rotation_matrix = np.array([[1, 0, 0],
+                                [0, cos_theta, -sin_theta],
+                                [0, sin_theta, cos_theta]])
+    return rotation_matrix
 
 class TrainLoopDiffusionWithRec(TrainLoop):
     """an interface with rec_model required apis
@@ -168,7 +180,9 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                                     save_img=False,
                                     render_reference=None,
                                     export_mesh=False,
-                                    render_all=False):
+                                    render_all=False, 
+                                    mesh_size=192, 
+                                    mesh_thres=10):
 
         planes *= self.triplane_scaling_divider  # if setting clip_denoised=True, the sampled planes will lie in [-1,1]. Thus, values beyond [+- std] will be abandoned in this version. Move to IN for later experiments.
 
@@ -191,9 +205,6 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                       behaviour='decode_after_vae_no_render'))
 
         if export_mesh:
-            # if True:
-            mesh_size = 192 # avoid OOM on V100
-            mesh_thres = 10  # TODO, requires tuning
             import mcubes
             import trimesh
             dump_path = f'{logger.get_dir()}/mesh/'
@@ -217,6 +228,10 @@ class TrainLoopDiffusionWithRec(TrainLoop):
             vtx_colors = rec_model.decoder.forward_points(ddpm_latent['latent_after_vit'], vtx_tensor)['rgb'].float().squeeze(0).cpu().numpy()  # (0, 1)
             vtx_colors = (vtx_colors.clip(0,1) * 255).astype(np.uint8)
 
+            # rotate mesh along x dim
+            vtx = np.transpose(rotation_matrix_x(-90) @ np.transpose(vtx))
+
+
             mesh = trimesh.Trimesh(vertices=vtx, faces=faces, vertex_colors=vtx_colors)
             # st()
             # mesh = trimesh.Trimesh(
@@ -224,16 +239,17 @@ class TrainLoopDiffusionWithRec(TrainLoop):
             #     faces=faces,
             # )
 
-            mesh_dump_path = os.path.join(dump_path, f'{name_prefix}.ply')
-            mesh.export(mesh_dump_path, 'ply')
+            mesh_dump_path = os.path.join(dump_path, f'{name_prefix}.obj')
+            mesh.export(mesh_dump_path, 'obj')
 
-            print(f"Mesh dumped to {dump_path}")
+            logger.log(f"Mesh dumped to {mesh_dump_path}")
             del grid_out, mesh
             th.cuda.empty_cache()
             # return
 
+        vid_dump_path = f'{logger.get_dir()}/triplane_{name_prefix}.mp4'
         video_out = imageio.get_writer(
-            f'{logger.get_dir()}/triplane_{name_prefix}.mp4',
+            vid_dump_path,
             mode='I',
             fps=15,
             codec='libx264')
@@ -353,10 +369,11 @@ class TrainLoopDiffusionWithRec(TrainLoop):
         # if not save_img:
         video_out.close()
         del video_out
-        print('logged video to: ',
-              f'{logger.get_dir()}/triplane_{name_prefix}.mp4')
+        print('logged video to: ', f'{vid_dump_path}')
 
         del vis, pred_vis, micro, pred,
+
+        return vid_dump_path, mesh_dump_path
 
     def _init_optim_groups(self, rec_model, freeze_decoder=False):
         """for initializing the reconstruction model; fixing decoder part.
@@ -758,25 +775,40 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                                   model=None,
                                   model_name='ddpm',
                                   resume_checkpoint=None):
-        if resume_checkpoint is None:
-            resume_checkpoint, self.resume_step = find_resume_checkpoint(
-                self.resume_checkpoint, model_name) or self.resume_checkpoint
+        # load safetensors from hf
+
+        hf_loading  = '.safetensors' in self.resume_checkpoint
+        if not hf_loading:
+            if resume_checkpoint is None:
+                resume_checkpoint, self.resume_step = find_resume_checkpoint(
+                    self.resume_checkpoint, model_name) or self.resume_checkpoint
 
         if model is None:
             model = self.model
 
-        if resume_checkpoint and Path(resume_checkpoint).exists():
+        if hf_loading or (resume_checkpoint and Path(resume_checkpoint).exists()):
             if dist_util.get_rank() == 0:
                 # ! rank 0 return will cause all other ranks to hang
-                logger.log(
-                    f"loading model from checkpoint: {resume_checkpoint}...")
                 map_location = {
                     'cuda:%d' % 0: 'cuda:%d' % dist_util.get_rank()
                 }  # configure map_location properly
-
                 logger.log(f'mark {model_name} loading ')
-                resume_state_dict = dist_util.load_state_dict(
-                    resume_checkpoint, map_location=map_location)
+
+                if hf_loading:
+                    logger.log(
+                        f"loading model from huggingface: yslan/LN3Diff/{self.resume_checkpoint}...")
+                else:
+                    logger.log(
+                        f"loading model from checkpoint: {resume_checkpoint}...")
+                
+                if hf_loading:
+                    model_path = hf_hub_download(repo_id="yslan/LN3Diff", 
+                            filename=self.resume_checkpoint)
+                    resume_state_dict = load_file(model_path)
+                else:
+                    resume_state_dict = dist_util.load_state_dict(
+                        resume_checkpoint, map_location=map_location)
+
                 logger.log(f'mark {model_name} loading finished')
 
                 model_state_dict = model.state_dict()

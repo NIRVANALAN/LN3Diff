@@ -130,6 +130,9 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :mega: Updates
 
+[08/2024] We have released the local gradio demo on i23d, simply run ```bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh```.
+
+
 [08/2024] We have released the new 3D VAE trained on G-Objaverse full sets, and the corresponding DiT-based T23D and I23D model, trained with flow-matching. Please check the samples below.
 
 [06/2024] LN3Diff got accepted to ECCV 2024 :partying_face:! 
@@ -141,7 +144,8 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :dromedary_camel: TODO
 
-- [ ] Add Gradio demo.
+- [ ] Add Gradio space demo.
+- [x] Add Gradio local demo.
 - [x] Release the new I23D flow-matching-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
 - [x] Release the new T23D DDPM-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
 - [x] Release the new 3D VAE trained with 180K G-Objaverse instances (July 2024).
@@ -178,10 +182,8 @@ The environment can be created via ```conda env create -f environment_ln3diff.ym
 If you want to reuse your own PyTorch environment, install the following packages in your environment:
 
 ```
-# first, check whether you have installed pytorch (>=2.0) and xformers.
-conda install -c conda-forge openexr-python git
-pip install openexr lpips imageio kornia opencv-python tensorboard tqdm timm ffmpeg einops beartype imageio[ffmpeg] blobfile ninja lmdb webdataset opencv-python click torchdiffeq transformers
-pip install git+https://github.com/nupurkmr9/vision-aided-gan
+pip install -r requirements.txt
+# then, install apex from https://github.com/NVIDIA/apex. Note that you should build with cuda support.
 ```
 
 ## :running_woman: Inference

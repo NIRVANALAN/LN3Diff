@@ -517,12 +517,14 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
         # cfg_scale=4, # default value in SiT
         # cfg_scale=1.5, # default value in SiT
         cfg_scale=4.0, # default value in SiT
+        num_steps=250,
+        seed=42,
         **kwargs,
     ):
         # self.sampler
-        sample_fn = self.transport_sampler.sample_ode(num_steps=250, cfg=True) # default ode sampling setting.
+        sample_fn = self.transport_sampler.sample_ode(num_steps=num_steps, cfg=True) # default ode sampling setting.
 
-        # th.manual_seed(42) # reproducible
+        th.manual_seed(seed) # reproducible
         zs = th.randn(batch_size, *shape).to(dist_util.dev()).to(self.dtype)
         assert use_cfg
         # sample_model_kwargs = {'uc': uc, 'cond': cond}       
@@ -677,3 +679,147 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
 
 
         self.ddpm_model.train()
+
+    @th.inference_mode()
+    def eval_i23d_and_export(
+        self,
+        inp_img,
+        num_steps=250,
+        seed=42,
+        mesh_size=192,
+        mesh_thres=10,
+        unconditional_guidance_scale=4.0, # default value in neural ode
+        # camera,
+        prompt="",
+        save_img=False,
+        use_train_trajectory=False,
+        num_samples=1,
+        num_instances=1,
+        export_mesh=True,
+        **kwargs,
+    ):
+
+        # output_model, output_video = './logs/LSGM/inference/Objaverse/i23d/dit-L2/gradio_app/mesh/cfg=4.0_sample-0.obj', './logs/LSGM/inference/Objaverse/i23d/dit-L2/gradio_app/triplane_cfg=4.0_sample-0.mp4'
+
+        # return output_model, output_video
+        logger.log(
+            num_steps,
+            unconditional_guidance_scale,
+            seed,
+            mesh_size,
+            mesh_thres,
+        )
+
+        camera = th.load('assets/objv_eval_pose.pt', map_location=dist_util.dev())[:]
+        inp_img = th.from_numpy(inp_img).permute(2,0,1).unsqueeze(0) / 127.5 - 1 # to [-1,1]
+
+        # for gradio demo
+
+        self.ddpm_model.eval()
+        # assert unconditional_guidance_scale == 4.0
+
+        args = dnnlib.EasyDict(
+            dict(
+                batch_size=1,
+                image_size=self.diffusion_input_size,
+                denoise_in_channels=self.rec_model.decoder.triplane_decoder.
+                out_chans,  # type: ignore
+                clip_denoised=False,
+                class_cond=False))
+
+        model_kwargs = {}
+
+        uc = None
+        log = dict()
+
+        ucg_keys = [self.cond_key] # i23d
+
+        sampling_kwargs = {'cfg_scale': unconditional_guidance_scale, 'num_steps': num_steps, 'seed': seed}
+
+        N = num_samples  # hard coded, to update
+        z_shape = (
+            N,
+            self.ddpm_model.in_channels if not self.ddpm_model.roll_out else
+            3 * self.ddpm_model.in_channels,  # type: ignore
+            self.diffusion_input_size,
+            self.diffusion_input_size)
+
+        # data = iter(self.data)
+
+        assert camera is not None
+        batch = {'c': camera.clone()[:24]}
+
+        def sample_and_save(batch_c):
+
+            with th.cuda.amp.autocast(dtype=self.dtype,
+                                        enabled=self.mp_trainer.use_amp):
+
+                c, uc = self.conditioner.get_unconditional_conditioning(
+                    batch_c,
+                    force_uc_zero_embeddings=ucg_keys
+                    if len(self.conditioner.embedders) > 0 else [],
+                )
+
+            for k in c:
+                if isinstance(c[k], th.Tensor):
+                    # c[k], uc[k] = map(lambda y: y[k][:N].to(dist_util.dev()),
+                    #                   (c, uc))
+                    assert c[k].shape[0] == 1
+                    c[k], uc[k] = map(lambda y: y[k].repeat_interleave(N, 0).to(dist_util.dev()),
+                                    (c, uc)) # support bs>1 sampling given a condition
+        
+            samples = self.sample(c,
+                                shape=z_shape[1:],
+                                uc=uc,
+                                batch_size=N,
+                                **sampling_kwargs)
+
+            # rendering
+            all_vid_dump_path = []
+            all_mesh_dump_path = []
+            for i in range(samples.shape[0]):
+                th.cuda.empty_cache()
+
+                # ! render sampled latent
+                name_prefix = f'cfg_{unconditional_guidance_scale}_sample-{i}'
+
+                if self.cond_key == 'caption':
+                    name_prefix = f'{name_prefix}_{prompt}'
+
+                with th.cuda.amp.autocast(dtype=self.dtype,
+                                            enabled=self.mp_trainer.use_amp):
+
+                    vid_dump_path, mesh_dump_path = self.render_video_given_triplane(
+                        samples[i:i+1].to(self.dtype),
+                        self.rec_model,  # compatible with join_model
+                        name_prefix=name_prefix,
+                        save_img=save_img,
+                        render_reference=batch,
+                        export_mesh=export_mesh, 
+                        render_all=True)
+
+                    all_vid_dump_path.append(vid_dump_path)
+                    all_mesh_dump_path.append(mesh_dump_path)
+
+            # return all_vid_dump_path, all_mesh_dump_path
+            return all_vid_dump_path[0], all_mesh_dump_path[0] # for compat issue
+
+
+        if self.cond_key == 'caption':
+            batch_c = {self.cond_key: prompt}
+            return sample_and_save(batch_c)
+        else: 
+            # for idx, batch in enumerate(data):
+            # batch = next(data) # using same cond here
+                # if self.cond_key == 'img-c':
+                #     batch_c = {
+                #         self.cond_key: {
+                #             'img': batch['img'].to(self.dtype).to(dist_util.dev()),
+                #             'c': batch['c'].to(self.dtype).to(dist_util.dev()),
+                #         },
+                #         'img': batch['img'].to(self.dtype).to(dist_util.dev()) # required by clip
+                #     }
+
+                # else:
+            batch_c = {self.cond_key: inp_img.to(dist_util.dev()).to(self.dtype)}
+            return sample_and_save(batch_c) 
