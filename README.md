@@ -125,6 +125,8 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
   <a href="https://nirvanalan.github.io/projects/ln3diff/" target='_blank'>[Project Page]</a>
   •
   <a href="https://arxiv.org/pdf/2403.12019.pdf" target='_blank'>[arXiv]</a> 
+  •
+  <a href="https://huggingface.co/spaces/yslan/LN3Diff_I23D" target='_blank'>[Gradio Demo]</a> 
 </h4>
 
 
