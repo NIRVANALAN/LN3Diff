@@ -9,9 +9,14 @@ from pdb import set_trace as st
 
 from ldm.modules.attention import MemoryEfficientCrossAttention
 from .dit_models_xformers import DiT, get_2d_sincos_pos_embed, ImageCondDiTBlock, FinalLayer, CaptionEmbedder, approx_gelu, ImageCondDiTBlockPixelArt, t2i_modulate, ImageCondDiTBlockPixelArtRMSNorm, T2IFinalLayer, ImageCondDiTBlockPixelArtRMSNormNoClip
-from apex.normalization import FusedLayerNorm as LayerNorm
-from apex.normalization import FusedRMSNorm as RMSNorm
 from timm.models.vision_transformer import Mlp
+
+# from apex.normalization import FusedLayerNorm as LayerNorm
+# from apex.normalization import FusedRMSNorm as RMSNorm
+
+
+from torch.nn import LayerNorm
+from dit.norm import RMSNorm
 
 # from vit.vit_triplane import XYZPosEmbed
 
@@ -103,7 +108,7 @@ class DiT_I23D(DiT):
         clip_cls_token = self.clip_text_proj(context['vector'])
         clip_spatial_token, dino_spatial_token = context['crossattn'][..., :self.clip_ctx_dim], self.dino_proj(context['crossattn'][..., self.clip_ctx_dim:])
 
-        t = self.t_embedder(timesteps) + clip_cls_token  # (N, D)
+        t = self.t_embedder(timesteps.to(x)) + clip_cls_token  # (N, D)
         # ! todo, return spatial clip features.
 
         # if self.roll_out:  # !
@@ -237,11 +242,11 @@ class DiT_I23D_PixelArt(DiT_I23D):
         # t = timesteps
         assert isinstance(context, dict)
         # context = self.clip_text_proj(context)
-        clip_cls_token = self.cap_embedder(context['vector'])
-        clip_spatial_token, dino_spatial_token = context['crossattn'][..., :self.clip_ctx_dim], self.dino_proj(context['crossattn'][..., self.clip_ctx_dim:])
-        clip_spatial_token = self.attention_y_norm(clip_spatial_token) # avoid re-normalization in each blk
+        clip_cls_token = self.cap_embedder(context['vector'].to(x))
+        clip_spatial_token, dino_spatial_token = context['crossattn'].to(x)[..., :self.clip_ctx_dim], self.dino_proj(context['crossattn'][..., self.clip_ctx_dim:])
+        clip_spatial_token = self.attention_y_norm(clip_spatial_token.to(x)) # avoid re-normalization in each blk
 
-        t = self.t_embedder(timesteps) + clip_cls_token  # (N, D)
+        t = self.t_embedder(timesteps.to(x)) + clip_cls_token  # (N, D)
         t0 = self.adaLN_modulation(t) # single-adaLN, B 6144
 
         # if self.roll_out:  # !

@@ -534,10 +534,10 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
         c_out = {}
         for k in cond:
             if k in ["vector", "crossattn", "concat"]:
-                c_out[k] = th.cat((cond[k], uc[k]), 0)
+                c_out[k] = th.cat((cond[k], uc[k]), 0).to(self.dtype)
             else:
                 assert cond[k] == uc[k]
-                c_out[k] = cond[k]
+                c_out[k] = cond[k].to(self.dtype)
 
         sample_model_kwargs = {'context': c_out, 'cfg_scale': cfg_scale}
         zs = th.cat([zs, zs], 0)
@@ -751,14 +751,14 @@ class FlowMatchingEngine(TrainLoop3DDiffusionLSGM_crossattn):
 
         def sample_and_save(batch_c):
 
-            with th.cuda.amp.autocast(dtype=self.dtype,
-                                        enabled=self.mp_trainer.use_amp):
+            # with th.cuda.amp.autocast(dtype=self.dtype,
+            #                             enabled=self.mp_trainer.use_amp):
 
-                c, uc = self.conditioner.get_unconditional_conditioning(
-                    batch_c,
-                    force_uc_zero_embeddings=ucg_keys
-                    if len(self.conditioner.embedders) > 0 else [],
-                )
+            c, uc = self.conditioner.get_unconditional_conditioning(
+                batch_c,
+                force_uc_zero_embeddings=ucg_keys
+                if len(self.conditioner.embedders) > 0 else [],
+            )
 
             for k in c:
                 if isinstance(c[k], th.Tensor):

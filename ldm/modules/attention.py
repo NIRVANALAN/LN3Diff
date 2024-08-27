@@ -16,7 +16,10 @@ _ATTN_PRECISION = os.environ.get("ATTN_PRECISION", "fp32")
 from xformers.ops import MemoryEfficientAttentionFlashAttentionOp
 # from xformers.ops import RMSNorm, fmha, rope_padded
 # import apex
-from apex.normalization import FusedRMSNorm as RMSNorm
+
+# from apex.normalization import FusedRMSNorm as RMSNorm
+# from diffusers.models.normalization import RMSNorm
+from dit.norm import RMSNorm
 
 
 def exists(val):
@@ -255,8 +258,8 @@ class MemoryEfficientCrossAttention(nn.Module):
         # self.q_rmsnorm = RMSNorm(query_dim, eps=1e-5)
         # self.k_rmsnorm = RMSNorm(context_dim, eps=1e-5)
 
-        self.q_norm = RMSNorm(self.dim_head, elementwise_affine=True) if qk_norm else nn.Identity()
-        self.k_norm = RMSNorm(self.dim_head, elementwise_affine=True) if qk_norm else nn.Identity()
+        self.q_norm = RMSNorm(self.dim_head, elementwise_affine=True, eps=1e-5) if qk_norm else nn.Identity()
+        self.k_norm = RMSNorm(self.dim_head, elementwise_affine=True, eps=1e-5) if qk_norm else nn.Identity()
 
         # self.enable_rmsnorm = enable_rmsnorm
 

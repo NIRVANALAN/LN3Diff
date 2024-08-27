@@ -130,7 +130,7 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :mega: Updates
 
-[08/2024] We have released the local gradio demo on i23d, simply run ```bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh```.
+[08/2024] We have released the ZeroGPU huggingface demo on I23D, please check it on the [Gradio space](https://huggingface.co/spaces/yslan/LN3Diff_I23D). For local run, simply run ```bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh```.
 
 
 [08/2024] We have released the new 3D VAE trained on G-Objaverse full sets, and the corresponding DiT-based T23D and I23D model, trained with flow-matching. Please check the samples below.
@@ -144,7 +144,7 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :dromedary_camel: TODO
 
-- [ ] Add Gradio space demo.
+- [x] Add Gradio space demo.
 - [x] Add Gradio local demo.
 - [x] Release the new I23D flow-matching-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
 - [x] Release the new T23D DDPM-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
@@ -190,7 +190,7 @@ pip install -r requirements.txt
 
 ### Download Models
 
-The pretrained stage-1 VAE and stage-2 LDM can be downloaded via [OneDrive](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/EdOR7CbhyndFryaDnlexFqwBIr9XzFgdKXoLOOIagt7Ggw?e=ZzULnq).
+The pretrained checkpoints can be downloaded via [OneDrive](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/ErdRV9hCYvlBioObT1v_LZ4Bnwye3sv6p5qiVZPNhI9coQ?e=YpJ3jz).
 
 Put the downloaded checkpoints under ```checkpoints``` folder for inference. The checkpoints directory layout should be
 

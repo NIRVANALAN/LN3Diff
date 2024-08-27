@@ -24,8 +24,13 @@ from pdb import set_trace as st
 from ldm.modules.attention import CrossAttention
 from vit.vision_transformer import MemEffAttention as Attention
 # import apex
-from apex.normalization import FusedRMSNorm as RMSNorm
-from apex.normalization import FusedLayerNorm as LayerNorm
+
+# from apex.normalization import FusedRMSNorm as RMSNorm
+# from apex.normalization import FusedLayerNorm as LayerNorm
+
+# from diffusers.models.normalization import RMSNorm
+from torch.nn import LayerNorm
+from dit.norm import RMSNorm
 
 # from torch.nn import LayerNorm
 # from xformers import triton

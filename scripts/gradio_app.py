@@ -132,8 +132,6 @@ def main(args):
     # denoise_model.load_state_dict(
     #     dist_util.load_state_dict(args.ddpm_model_path, map_location="cpu"))
     denoise_model.to(dist_util.dev())
-    if args.use_fp16:
-        denoise_model.convert_to_fp16()
     denoise_model.eval()
 
     # * auto-encoder reconstruction model
@@ -144,6 +142,10 @@ def main(args):
 
     auto_encoder.to(dist_util.dev())
     auto_encoder.eval()
+
+    # faster inference
+    # denoise_model = denoise_model.to(th.bfloat16)
+    # auto_encoder = auto_encoder.to(th.bfloat16)
 
     # TODO, how to set the scale?
     logger.log("create dataset")
@@ -190,6 +192,8 @@ def main(args):
                                     data=data,
                                     eval_data=None,
                                     **vars(args))
+    # ! move to bf16
+    # training_loop_class.conditioner = training_loop_class.conditioner.to(th.bfloat16)
 
     # logger.log("sampling...")
     # dist_util.synchronize()
@@ -358,7 +362,7 @@ def main(args):
         )
 
     demo.queue(max_size=1)
-    demo.launch(share=True)
+    demo.launch()
 
 # training_loop_class.eval_i23d_and_export(
 #         # prompt=args.prompt,

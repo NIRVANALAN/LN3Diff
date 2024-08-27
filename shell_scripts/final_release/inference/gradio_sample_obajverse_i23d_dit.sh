@@ -182,7 +182,7 @@ torchrun --nproc_per_node=1 \
  --enable_mixing_normal False \
  --use_lmdb_compressed False \
  --use_lmdb False \
- --use_amp True \
+ --use_amp False \
  --allow_tf32 True \
  --load_wds_diff True \
  --mv_input True \

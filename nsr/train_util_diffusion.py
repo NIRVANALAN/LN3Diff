@@ -36,6 +36,7 @@ from guided_diffusion.train_util import (TrainLoop, calc_average_loss,
 import dnnlib
 
 from nsr.camera_utils import FOV_to_intrinsics, LookAtPoseSampler
+from huggingface_hub import hf_hub_download
 
 # AMP
 # from accelerate import Accelerator

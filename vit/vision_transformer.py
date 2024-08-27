@@ -34,8 +34,11 @@ from .utils import trunc_normal_
 
 from pdb import set_trace as st
 # import apex
-from apex.normalization import FusedRMSNorm as RMSNorm
-from apex.normalization import FusedLayerNorm as LayerNorm
+# from apex.normalization import FusedLayerNorm as LayerNorm
+# from diffusers.models.normalization import RMSNorm
+from dit.norm import RMSNorm
+from torch.nn import LayerNorm
+# from apex.normalization import FusedRMSNorm as RMSNorm
 
 try:
     from xformers.ops import memory_efficient_attention, unbind, fmha
@@ -69,8 +72,8 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         # https://github.com/huggingface/pytorch-image-models/blob/5dce71010174ad6599653da4e8ba37fd5f9fa572/timm/models/vision_transformer.py#L79C1-L80C78
-        self.q_norm = RMSNorm(head_dim, elementwise_affine=True) if qk_norm else nn.Identity() # sd-3 
-        self.k_norm = RMSNorm(head_dim, elementwise_affine=True) if qk_norm else nn.Identity()
+        self.q_norm = RMSNorm(head_dim, elementwise_affine=True, eps=1e-5) if qk_norm else nn.Identity() # sd-3 
+        self.k_norm = RMSNorm(head_dim, elementwise_affine=True, eps=1e-5) if qk_norm else nn.Identity()
 
         # if qk_norm:
         #     self.q_norm = LayerNorm(dim, eps=1e-5)
