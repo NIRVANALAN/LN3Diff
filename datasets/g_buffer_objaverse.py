@@ -267,8 +267,8 @@ def load_eval_data(
                               interval=interval)
 
     elif load_real:
-        # dataset = RealDataset(file_path,
-        dataset = RealMVDataset(file_path,
+        dataset = RealDataset(file_path,
+        # dataset = RealMVDataset(file_path,
                               reso,
                               reso_encoder,
                               preprocess=preprocess,
