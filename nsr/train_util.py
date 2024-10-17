@@ -115,7 +115,10 @@ class TrainLoopBasic:
         self.dtype = th.float32 # tf32 by default
 
         if use_amp: 
-            self.dtype = th.bfloat16
+            if torch.cuda.get_device_capability(0)[0] < 8:
+                self.dtype = th.float16 # e.g., v100
+            else:
+                self.dtype = th.bfloat16 # e.g., a100 / a6000
 
         self.mp_trainer_rec = MixedPrecisionTrainer(
             model=self.rec_model,

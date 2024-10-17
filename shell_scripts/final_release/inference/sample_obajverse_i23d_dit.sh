@@ -65,8 +65,9 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
- --resume_checkpoint checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.pt \
+ --resume_checkpoint checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.safetensors \
  "
+
 #  --resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-L2-pixart-lognorm-rmsnorm-layernorm_before_pooled/gpu7-batch40-lr1e-4-bf16-qknorm-ctd3/model_joint_denoise_rec_model2990000.pt \
 
 
@@ -84,7 +85,7 @@ DDPM_MODEL_FLAGS="
 # ! diffusion steps and noise schedule not used, since the continuous diffusion is adopted.
 DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 --use_kl False \
---use_amp False \
+--use_amp True \
 --triplane_scaling_divider ${triplane_scaling_divider} \
 --trainer_name flow_matching \
 --mixed_prediction False \
@@ -104,7 +105,7 @@ DIFFUSION_FLAGS="--diffusion_steps 1000 --noise_schedule linear \
 --roll_out True \
 "
 
-logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/sample_for_demo2
+logdir=./logs/LSGM/inference/Objaverse/i23d/dit-L2/out
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -178,8 +179,7 @@ torchrun --nproc_per_node=$NUM_GPUS \
  --enable_mixing_normal False \
  --use_lmdb_compressed False \
  --use_lmdb False \
- --use_amp True \
- --allow_tf32 True \
+ --allow_tf32 False \
  --load_wds_diff True \
  --mv_input True \
  --compile False \

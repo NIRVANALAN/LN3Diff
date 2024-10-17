@@ -11,7 +11,7 @@ patch_size=14
 batch_size=4 # BS=256 is enough
 microbatch=${batch_size}
 
-num_samples=32
+num_samples=4
 
 cfg_dropout_prob=0.1 # SD config
 
@@ -20,17 +20,13 @@ unconditional_guidance_scale=6.5
 num_workers=0
 
 eval_data_dir="NONE"
-shards_lst=/cpfs01/user/lanyushi.p/Repo/diffusion-3d/shell_scripts/baselines/reconstruction/sr/final_mv/diff_shards_lst_ani.txt
-eval_shards_lst="/cpfs01/user/lanyushi.p/Repo/diffusion-3d/shell_scripts/baselines/reconstruction/sr/final_mv/shards_animals_lst.txt"
 
 data_dir="NONE"
 DATASET_FLAGS="
  --data_dir ${data_dir} \
- --eval_shards_lst ${eval_shards_lst} \
- --shards_lst ${shards_lst} \
 "
 
-lr=2e-5 # for official DiT, lr=1e-4 for BS=256
+lr=0
 kl_lambda=0
 vit_lr=1e-5 # for improved-diffusion unet
 ce_lambda=0.5 # ?
@@ -77,8 +73,10 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
- --resume_checkpoint checkpoints/objaverse/objaverse-dit/t23d/model_joint_denoise_rec_model3820000.pt \
+ --resume_checkpoint checkpoints/objaverse/objaverse-dit/t23d/model_joint_denoise_rec_model3910000.safetensors \
  "
+
+#  --resume_checkpoint checkpoints/objaverse/objaverse-dit/t23d/model_joint_denoise_rec_model3820000.pt \
 
 
 #  --resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/sgm-engine/9cls/dit-L2/gpu7-batch32-lr1e-4-bf16-ctd/model_joint_denoise_rec_model3820000.pt \
@@ -129,13 +127,7 @@ DDIM_FLAGS="
 --unconditional_guidance_scale ${unconditional_guidance_scale} \
 "
 
-
-# logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/
-# logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples
-# logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres
-# logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres_seed41
-# logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres_seed41_reproduce
-logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/picksamples_382_highres_seed41_reproduce_sampleonly
+logdir=./logs/LSGM/inference/t23d/Objaverse/dit-L2/out
 
 SR_TRAIN_FLAGS_v1_2XC="
 --decoder_in_chans 32 \
@@ -150,8 +142,6 @@ SR_TRAIN_FLAGS_v1_2XC="
 --triplane_in_chans 32 \
 --decoder_output_dim 3 \
 "
-# --resume_checkpoint /mnt/lustre/yslan/logs/nips23/LSGM/ssd/chair/scaling/entropy/kl0_ema0.9999_vpsde_TrainLoop3DDiffusionLSGM_cvD_scaling_lsgm_unfreezeD_weightingv0_lsgm_unfreezeD_0.01_gradclip_nocesquare_clipH@0_noallAMP_dataset500/model_joint_denoise_rec_model0910000.pt \
-
 
 
 SR_TRAIN_FLAGS=${SR_TRAIN_FLAGS_v1_2XC}
@@ -166,8 +156,8 @@ export OMP_NUM_THREADS=12
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_NCCL_IB_GID_INDEX=3 # https://github.com/huggingface/accelerate/issues/314#issuecomment-1821973930
 export OPENCV_IO_ENABLE_OPENEXR=1
-# export CUDA_VISIBLE_DEVICES=0
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=0
+# export CUDA_VISIBLE_DEVICES=2
 
 torchrun --nproc_per_node=$NUM_GPUS \
   --nnodes 1 \

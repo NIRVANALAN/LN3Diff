@@ -30,5 +30,7 @@ rembg
 safetensors
 matplotlib
 git+https://github.com/nupurkmr9/vision-aided-gan
+PyMCubes
 trimesh
-pymcubes
+diffusers
+lz4

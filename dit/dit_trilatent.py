@@ -12,7 +12,12 @@ from .dit_models_xformers import DiT, get_2d_sincos_pos_embed, DiTBlock, FinalLa
 # from .dit_models_xformers import CaptionEmbedder, approx_gelu, ImageCondDiTBlockPixelArt, t2i_modulate
 # from fairscale.nn.model_parallel.layers import ColumnParallelLinear
 
-from apex.normalization import FusedLayerNorm as LayerNorm
+# from apex.normalization import FusedLayerNorm as LayerNorm
+try:
+    from apex.normalization import FusedLayerNorm as LayerNorm
+except:
+    from torch.nn import LayerNorm
+
 
 class DiT_TriLatent(DiT):
     # DiT with 3D_aware operations

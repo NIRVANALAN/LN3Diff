@@ -7,7 +7,7 @@ from einops import rearrange, repeat
 from pdb import set_trace as st
 
 from ldm.modules.diffusionmodules.util import checkpoint
-from apex.normalization import FusedLayerNorm as LayerNorm
+# from apex.normalization import FusedLayerNorm as LayerNorm
 
 
 # CrossAttn precision handling
@@ -19,7 +19,10 @@ from xformers.ops import MemoryEfficientAttentionFlashAttentionOp
 
 # from apex.normalization import FusedRMSNorm as RMSNorm
 # from diffusers.models.normalization import RMSNorm
-from dit.norm import RMSNorm
+try:
+    from apex.normalization import FusedRMSNorm as RMSNorm
+except:
+    from dit.norm import RMSNorm
 
 
 def exists(val):

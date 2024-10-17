@@ -61,13 +61,13 @@ class TrainLoop:
 
         self.use_amp = use_amp
 
-        if use_amp:
-            if th.backends.cuda.matmul.allow_tf32: # a100
-                self.dtype = th.bfloat16
+        self.dtype = th.float32
+        if use_amp: 
+            if th.cuda.get_device_capability(0)[0] < 8:
+                self.dtype = th.float16 # e.g., v100
             else:
-                self.dtype = th.float16
-        else:
-            self.dtype = th.float32
+                self.dtype = th.bfloat16 # e.g., a100 / a6000
+
 
         self.model_name = model_name
         self.model = model

@@ -36,7 +36,13 @@ from pdb import set_trace as st
 # import apex
 # from apex.normalization import FusedLayerNorm as LayerNorm
 # from diffusers.models.normalization import RMSNorm
-from dit.norm import RMSNorm
+# from dit.norm import RMSNorm
+
+try:
+    from apex.normalization import FusedRMSNorm as RMSNorm
+except:
+    from dit.norm import RMSNorm
+
 from torch.nn import LayerNorm
 # from apex.normalization import FusedRMSNorm as RMSNorm
 

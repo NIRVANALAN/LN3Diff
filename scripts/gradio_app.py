@@ -362,7 +362,7 @@ def main(args):
         )
 
     demo.queue(max_size=1)
-    demo.launch()
+    demo.launch(share=True)
 
 # training_loop_class.eval_i23d_and_export(
 #         # prompt=args.prompt,

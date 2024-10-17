@@ -1092,7 +1092,7 @@ class RealDataset(Dataset):
             if t.split('.')[1] in ['png', 'jpg']
         ]
 
-        all_fname = [name for name in all_fname if '-input' in name ]
+        # all_fname = [name for name in all_fname if '-input' in name ]
 
         self.rgb_list += ([
             os.path.join(self.file_path, fname) for fname in all_fname

@@ -909,6 +909,11 @@ class FrozenDinov2ImageEmbedderMVPlucker(FrozenDinov2ImageEmbedder):
         self.n_cond_frames = n_cond_frames
         self.dtype = torch.bfloat16 if enable_bf16 else torch.float32
         self.enable_bf16 = enable_bf16
+        if enable_bf16: # degrade to fp16
+            if torch.cuda.get_device_capability(0)[0] < 8:
+                self.dtype = th.float16 # e.g., v100
+            else:
+                self.dtype = th.bfloat16 # e.g., a100 / a6000
         self.aug_c = aug_c
 
         # ! proj c_cond to features

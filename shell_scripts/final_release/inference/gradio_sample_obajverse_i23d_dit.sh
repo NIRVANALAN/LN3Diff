@@ -67,12 +67,8 @@ TRAIN_FLAGS="--iterations 10001 --anneal_lr False \
  --sd_E_ch 64 \
  --sd_E_num_res_blocks 1 \
  --lrm_decoder False \
- --resume_checkpoint checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.pt \
+ --resume_checkpoint checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.safetensors \
  "
-
-# checkpoints/objaverse/objaverse-dit/i23d/model_joint_denoise_rec_model2990000.safetensors
-
-#  --resume_checkpoint /nas/shared/V2V/yslan/logs/nips24/LSGM/t23d/FM/9cls/i23d/dit-L2-pixart-lognorm-rmsnorm-layernorm_before_pooled/gpu7-batch40-lr1e-4-bf16-qknorm-ctd3/model_joint_denoise_rec_model2990000.pt \
 
 
 DDPM_MODEL_FLAGS="
@@ -145,6 +141,7 @@ export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TORCH_NCCL_IB_GID_INDEX=3 # https://github.com/huggingface/accelerate/issues/314#issuecomment-1821973930
 export OPENCV_IO_ENABLE_OPENEXR=1
 export CUDA_VISIBLE_DEVICES=0
+export GRADIO_TEMP_DIR="./temp" # on the server, cannot write to /tmp/ sometimes.
 
 torchrun --nproc_per_node=1 \
   --nnodes 1 \
@@ -182,8 +179,8 @@ torchrun --nproc_per_node=1 \
  --enable_mixing_normal False \
  --use_lmdb_compressed False \
  --use_lmdb False \
- --use_amp False \
- --allow_tf32 True \
+ --use_amp True \
+ --allow_tf32 False \
  --load_wds_diff True \
  --mv_input True \
  --compile False \

@@ -132,6 +132,8 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :mega: Updates
 
+[10/2024] Further organize the code and support loading checkpoint directly from huggingface.
+
 [08/2024] We have released the ZeroGPU huggingface demo on I23D, please check it on the [Gradio space](https://huggingface.co/spaces/yslan/LN3Diff_I23D). For local run, simply run ```bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh```.
 
 
@@ -144,34 +146,33 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 [03/2024] Initial code release.
 
 
-## :dromedary_camel: TODO
+### Demo
+<img src="./assets/huggingface-screenshot.png"
+            alt="Demo screenshot."/>
+Check out our online demo on [Gradio space](https://huggingface.co/spaces/yslan/LN3Diff_I23D). To run the demo locally, simply follow the installation instructions below, and afterwards call 
 
+```bash 
+bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh
+```
+
+
+### :dromedary_camel: TODO
+
+- [ ] Polish the dataset preparation and training doc.
 - [x] Add Gradio space demo.
 - [x] Add Gradio local demo.
 - [x] Release the new I23D flow-matching-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
 - [x] Release the new T23D DDPM-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
 - [x] Release the new 3D VAE trained with 180K G-Objaverse instances (July 2024).
 - [x] Release DiT-based, flow-matching based 3D generation framework (July 2024).
-- [ ] Polish the dataset preparation and training doc.
-- [ ] add metrics evaluation scripts and samples.
-- [ ] Lint the code.
+- [x] add metrics evaluation scripts and samples.
+- [x] Lint the code.
 - [x] Release the inference and training code (Apr 2024).
 - [x] Release the pre-trained checkpoints of ShapeNet and FFHQ (Apr 2024).
 - [x] Release the pre-trained checkpoints of T23D Objaverse model trained with 30K+ instances dataset (Apr 2024).
 - [x] Release the stage-1 VAE of Objaverse trained with 80K+ instances dataset (Apr 2024).
 
 
-
-## :handshake: Citation
-If you find our work useful for your research, please consider citing the paper:
-```
-@inproceedings{lan2024ln3diff,
-    title={LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation}, 
-    author={Yushi Lan and Fangzhou Hong and Shuai Yang and Shangchen Zhou and Xuyi Meng and Bo Dai and Xingang Pan and Chen Change Loy},
-    year={2024},
-    booktitle={ECCV},
-}
-```
 
 ## :desktop_computer: Requirements
 
@@ -188,9 +189,29 @@ pip install -r requirements.txt
 # then, install apex from https://github.com/NVIDIA/apex. Note that you should build with cuda support.
 ```
 
-## :running_woman: Inference
+# :running_woman: Inference
 
-### Download Models
+## (Recommended) Single-click inference on Objaverse-trained models
+
+The easiest way for inference on Objaverse model is by launching the gradio demo locally. The checkpoint will be directly downloaded form huggingface. 
+
+```bash 
+bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh
+```
+
+For cli inference for image-to-3D:
+
+```bash
+bash shell_scripts/final_release/inference/sample_obajverse_i23d_dit.sh
+```
+
+For cli inference for text-to-3D:
+
+```bash
+bash shell_scripts/final_release/inference/sample_obajverse_t23d_dit.sh
+```
+
+## Download Models manually & ShapeNet models inference
 
 The pretrained checkpoints can be downloaded via [OneDrive](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/ErdRV9hCYvlBioObT1v_LZ4Bnwye3sv6p5qiVZPNhI9coQ?e=YpJ3jz).
 
@@ -385,6 +406,19 @@ Coming soon.
 Compared to existing 3D generation framework such as SDS-based ([DreamFusion](https://dreamfusion3d.github.io/)), mulit-view generation-based ([MVDream](https://arxiv.org/abs/2308.16512), [Zero123++](https://github.com/SUDO-AI-3D/zero123plus), [Instant3D](https://instant-3d.github.io/)) and feedforward 3D reconstruction-based ([LRM](https://yiconghong.me/LRM/), [InstantMesh](https://github.com/TencentARC/InstantMesh), [LGM](https://github.com/3DTopia/LGM)), LN3Diff is an origin 3D Diffusion framework. 
 Like 2D/Video AIGC pipeline, LN3Diff first trains a 3D-VAE and then conduct LDM training (text/image conditioned) on the learned latent space. Some related methods from the industry ([Shape-E](https://github.com/openai/shap-e), [CLAY](https://github.com/CLAY-3D/OpenCLAY), [Meta 3D Gen](https://arxiv.org/abs/2303.05371)) also follow the same paradigm.
 Though currently the performance of the origin 3D LDM's works are overall inferior to reconstruction-based methods, we believe the proposed method has much potential and scales better with more data and compute resources, and may yield better 3D editing performance due to its compatability with diffusion model.
+
+
+## :handshake: BibTex
+If you find our work useful for your research, please consider citing the paper:
+```
+@inproceedings{lan2024ln3diff,
+    title={LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation}, 
+    author={Yushi Lan and Fangzhou Hong and Shuai Yang and Shangchen Zhou and Xuyi Meng and Bo Dai and Xingang Pan and Chen Change Loy},
+    year={2024},
+    booktitle={ECCV},
+}
+```
+
 
 ## :newspaper_roll:  License
 
