@@ -1105,7 +1105,15 @@ def dataset_defaults():
         append_depth=False,
         plucker_embedding=False,
         gs_cam_format=False,
+        frame_0_as_canonical=False,  # transform the first pose to a fixed position
+        # pcd_path=None,
+        # stage_1_output_dir='',
+        # load_pcd=False,
+        use_chunk=False, # jpeg chunk
         split_chunk_size=8,
+        # load_caption_dataset=False,
+        # load_mv_dataset=False,
+        export_mesh=False,
     )
     return res
 

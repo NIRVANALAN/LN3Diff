@@ -1275,9 +1275,7 @@ class TrainLoop3DRecNVPatchSingleForwardMV(TrainLoop3DRecNVPatchSingleForward):
         batch_size = batch['img_to_encoder'].shape[0]
 
         batch.pop('caption')  # not required
-        batch.pop('nv_caption')  # not required
         batch.pop('ins')  # not required
-        batch.pop('nv_ins')  # not required
 
         if '__key__' in batch.keys():
             batch.pop('__key__')
@@ -1345,21 +1343,13 @@ class TrainLoop3DRecNVPatchSingleForwardMV(TrainLoop3DRecNVPatchSingleForward):
                              dtype=th.float16,
                              enabled=self.mp_trainer_rec.use_amp):
 
-                # c = th.cat([micro['nv_c'], micro['c']]),  # predict novel view here
-                # c = th.cat([micro['nv_c'].repeat(3, 1), micro['c']]),  # predict novel view here
-                # instance_mv_num = batch_size // 4  # 4 pairs by default
-                # instance_mv_num = 4
-                # ! roll views for multi-view supervision
-                # c = micro['nv_c']
                 ray_origins = target['ray_origins']
                 ray_directions = target['ray_directions']
 
                 pred_nv_cano = self.rec_model(
-                    # latent=latent.expand(2,),
                     latent={
                         'latent_after_vit':  # ! triplane for rendering
-                        latent['latent_after_vit'].repeat_interleave(4, dim=0).repeat(2,1,1,1)  # NV=4
-                        # latent['latent_after_vit'].repeat_interleave(8, dim=0)  # NV=4
+                        latent['latent_after_vit'].repeat_interleave(6, dim=0).repeat(2,1,1,1)  # NV=4
                     },
                     c=nv_c,
                     behaviour='triplane_dec',

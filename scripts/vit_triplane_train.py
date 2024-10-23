@@ -186,23 +186,25 @@ def training_loop(args):
                                    dataset_defaults().keys()))
                 data = [data, overfitting_dataset, args.pose_warm_up_iter]
 
-            eval_data = load_eval_data(
-                file_path=args.eval_data_dir,
-                batch_size=args.eval_batch_size,
-                reso=args.image_size,
-                reso_encoder=args.image_size_encoder,  # 224 -> 128
-                num_workers=args.num_workers,
-                load_depth=True,  # for evaluation
-                preprocess=auto_encoder.preprocess,
-                # interval=args.interval,
-                # use_lmdb=args.use_lmdb,
-                # plucker_embedding=args.plucker_embedding,
-                # load_real=args.load_real,
-                # four_view_for_latent=args.four_view_for_latent,
-                # load_extra_36_view=args.load_extra_36_view,
-                # shuffle_across_cls=args.shuffle_across_cls,
-                **args_to_dict(args,
-                               dataset_defaults().keys()))
+            # eval_data = load_eval_data(
+            #     file_path=args.eval_data_dir,
+            #     batch_size=args.eval_batch_size,
+            #     reso=args.image_size,
+            #     reso_encoder=args.image_size_encoder,  # 224 -> 128
+            #     num_workers=args.num_workers,
+            #     load_depth=True,  # for evaluation
+            #     preprocess=auto_encoder.preprocess,
+            #     # interval=args.interval,
+            #     # use_lmdb=args.use_lmdb,
+            #     # plucker_embedding=args.plucker_embedding,
+            #     # load_real=args.load_real,
+            #     # four_view_for_latent=args.four_view_for_latent,
+            #     # load_extra_36_view=args.load_extra_36_view,
+            #     # shuffle_across_cls=args.shuffle_across_cls,
+            #     **args_to_dict(args,
+            #                    dataset_defaults().keys()))
+
+            eval_data = None # not required for VAE training
 
     logger.log("creating data loader done...")
 

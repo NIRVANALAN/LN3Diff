@@ -18,6 +18,8 @@ from pdb import set_trace as st
 from pathlib import Path
 import torchvision
 
+import kornia
+from nsr.volumetric_rendering.ray_sampler import RaySampler
 from nsr.camera_utils import generate_input_camera
 from einops import rearrange, repeat
 from functools import partial
@@ -32,6 +34,7 @@ from torchvision import transforms
 from torch.utils.data.distributed import DistributedSampler
 from pathlib import Path
 import lz4.frame
+from tqdm import tqdm
 
 import torch.multiprocessing
 
@@ -48,6 +51,16 @@ from .shapenet import LMDBDataset, LMDBDataset_MV_Compressed, decompress_and_ope
 from kiui.op import safe_normalize
 
 from utils.gs_utils.graphics_utils import getWorld2View2, getProjectionMatrix, getView2World
+
+def unity2blender_fix(normal): # up blue, left green, front (towards inside) red
+    normal_clone = normal.copy()
+    # normal_clone[..., 0] = -normal[..., 2]
+    # normal_clone[..., 1] = -normal[..., 0]
+    normal_clone[..., 0] = -normal[..., 0] # swap r and g
+    normal_clone[..., 1] = -normal[..., 2]
+    normal_clone[..., 2] = normal[..., 1]
+
+    return normal_clone
 
 
 def fov2focal(fov, pixels):
@@ -73,12 +86,1177 @@ def resize_depth_mask_Tensor(depth_to_resize, resolution):
             size=(resolution, resolution),
             # mode='bilinear',
             mode='nearest',
-            align_corners=False,
+            # align_corners=False,
         ).squeeze(1)
     else:
         depth_resized = depth_to_resize
 
-    return depth_resized, depth_resized > 0  # type: ignore
+    return depth_resized.float(), depth_resized > 0  # type: ignore
+
+
+class PostProcess:
+
+    def __init__(
+        self,
+        reso,
+        reso_encoder,
+        imgnet_normalize,
+        plucker_embedding,
+        decode_encode_img_only,
+        mv_input,
+        split_chunk_input,
+        duplicate_sample,
+        append_depth,
+        gs_cam_format,
+        orthog_duplicate,
+        frame_0_as_canonical,
+        pcd_path=None,
+        load_pcd=False,
+        split_chunk_size=8,
+        append_xyz=False,
+    ) -> None:
+
+        self.load_pcd = load_pcd
+
+        if pcd_path is None:  # hard-coded
+            pcd_path = '/cpfs01/user/lanyushi.p/data/FPS_PCD/pcd-V=6_256_again/fps-pcd/'
+
+        self.pcd_path = Path(pcd_path)
+
+        self.append_xyz = append_xyz
+        if append_xyz:
+            assert append_depth is False
+        self.frame_0_as_canonical = frame_0_as_canonical
+        self.gs_cam_format = gs_cam_format
+        self.append_depth = append_depth
+        self.plucker_embedding = plucker_embedding
+        self.decode_encode_img_only = decode_encode_img_only
+        self.duplicate_sample = duplicate_sample
+        self.orthog_duplicate = orthog_duplicate
+
+        self.zfar = 100.0
+        self.znear = 0.01
+
+        transformations = []
+        if not split_chunk_input:
+            transformations.append(transforms.ToTensor())
+
+        if imgnet_normalize:
+            transformations.append(
+                transforms.Normalize((0.485, 0.456, 0.406),
+                                     (0.229, 0.224, 0.225))  # type: ignore
+            )
+        else:
+            transformations.append(
+                transforms.Normalize((0.5, 0.5, 0.5),
+                                     (0.5, 0.5, 0.5)))  # type: ignore
+
+        self.normalize = transforms.Compose(transformations)
+
+        self.reso_encoder = reso_encoder
+        self.reso = reso
+        self.instance_data_length = 40
+        # self.pair_per_instance = 1 # compat
+        self.mv_input = mv_input
+        self.split_chunk_input = split_chunk_input  # 8
+        self.chunk_size = split_chunk_size if split_chunk_input else 40
+        # assert self.chunk_size in [8, 10]
+        self.V = self.chunk_size // 2  # 4 views as input
+        # else:
+        #     assert self.chunk_size == 20
+        #     self.V = 12  # 6 + 6 here
+
+        # st()
+        assert split_chunk_input
+        self.pair_per_instance = 1
+        # else:
+        #     self.pair_per_instance = 4 if mv_input else 2  # check whether improves IO
+
+        self.ray_sampler = RaySampler()  # load xyz
+
+    def gen_rays(self, c):
+        # Generate rays
+        intrinsics, c2w = c[16:], c[:16].reshape(4, 4)
+        self.h = self.reso_encoder
+        self.w = self.reso_encoder
+        yy, xx = torch.meshgrid(
+            torch.arange(self.h, dtype=torch.float32) + 0.5,
+            torch.arange(self.w, dtype=torch.float32) + 0.5,
+            indexing='ij')
+
+        # normalize to 0-1 pixel range
+        yy = yy / self.h
+        xx = xx / self.w
+
+        # K = np.array([f_x, 0, w / 2, 0, f_y, h / 2, 0, 0, 1]).reshape(3, 3)
+        cx, cy, fx, fy = intrinsics[2], intrinsics[5], intrinsics[
+            0], intrinsics[4]
+        # cx *= self.w
+        # cy *= self.h
+
+        # f_x = f_y = fx * h / res_raw
+        c2w = torch.from_numpy(c2w).float()
+
+        xx = (xx - cx) / fx
+        yy = (yy - cy) / fy
+        zz = torch.ones_like(xx)
+        dirs = torch.stack((xx, yy, zz), dim=-1)  # OpenCV convention
+        dirs /= torch.norm(dirs, dim=-1, keepdim=True)
+        dirs = dirs.reshape(-1, 3, 1)
+        del xx, yy, zz
+        # st()
+        dirs = (c2w[None, :3, :3] @ dirs)[..., 0]
+
+        origins = c2w[None, :3, 3].expand(self.h * self.w, -1).contiguous()
+        origins = origins.view(self.h, self.w, 3)
+        dirs = dirs.view(self.h, self.w, 3)
+
+        return origins, dirs
+
+    def _post_process_batch_sample(self,
+                                   sample):  # sample is an instance batch here
+        caption, ins = sample[-2:]
+        instance_samples = []
+
+        for instance_idx in range(sample[0].shape[0]):
+            instance_samples.append(
+                self._post_process_sample(item[instance_idx]
+                                          for item in sample[:-2]))
+
+        return (*instance_samples, caption, ins)
+
+    def _post_process_sample(self, data_sample):
+        # raw_img, depth, c, bbox, caption, ins = data_sample
+        # st()
+        raw_img, depth, c, bbox = data_sample
+
+        bbox = (bbox * (self.reso / 256)).astype(
+            np.uint8)  # normalize bbox to the reso range
+
+        if raw_img.shape[-2] != self.reso_encoder:
+            img_to_encoder = cv2.resize(raw_img,
+                                        (self.reso_encoder, self.reso_encoder),
+                                        interpolation=cv2.INTER_LANCZOS4)
+        else:
+            img_to_encoder = raw_img
+
+        img_to_encoder = self.normalize(img_to_encoder)
+        if self.plucker_embedding:
+            rays_o, rays_d = self.gen_rays(c)
+            rays_plucker = torch.cat(
+                [torch.cross(rays_o, rays_d, dim=-1), rays_d],
+                dim=-1).permute(2, 0, 1)  # [h, w, 6] -> 6,h,w
+            img_to_encoder = torch.cat([img_to_encoder, rays_plucker], 0)
+
+        img = cv2.resize(raw_img, (self.reso, self.reso),
+                         interpolation=cv2.INTER_LANCZOS4)
+
+        img = torch.from_numpy(img).permute(2, 0, 1) / 127.5 - 1
+
+        if self.decode_encode_img_only:
+            depth_reso, fg_mask_reso = depth, depth
+        else:
+            depth_reso, fg_mask_reso = resize_depth_mask(depth, self.reso)
+
+        # return {
+        #     # **sample,
+        #     'img_to_encoder': img_to_encoder,
+        #     'img': img,
+        #     'depth_mask': fg_mask_reso,
+        #     # 'img_sr': img_sr,
+        #     'depth': depth_reso,
+        #     'c': c,
+        #     'bbox': bbox,
+        #     'caption': caption,
+        #     'ins': ins
+        #     # ! no need to load img_sr for now
+        # }
+        # if len(data_sample) == 4:
+        return (img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox)
+        # else:
+        #     return (img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox, data_sample[-2], data_sample[-1])
+
+    def canonicalize_pts(self, c, pcd, for_encoder=True, canonical_idx=0):
+        # pcd: sampled in world space
+
+        assert c.shape[0] == self.chunk_size
+        assert for_encoder
+
+        # st()
+
+        B = c.shape[0]
+        camera_poses = c[:, :16].reshape(B, 4, 4)  # 3x4
+
+        cam_radius = np.linalg.norm(
+            c[[0, self.V]][:, :16].reshape(2, 4, 4)[:, :3, 3],
+            axis=-1,
+            keepdims=False)  # since g-buffer adopts dynamic radius here.
+        frame1_fixed_pos = np.repeat(np.eye(4)[None], 2, axis=0)
+        frame1_fixed_pos[:, 2, -1] = -cam_radius
+
+        transform = frame1_fixed_pos @ np.linalg.inv(camera_poses[[0, self.V
+                                                                   ]])  # B 4 4
+        transform = np.expand_dims(transform, axis=1)  # B 1 4 4
+        # from LGM, https://github.com/3DTopia/LGM/blob/fe8d12cff8c827df7bb77a3c8e8b37408cb6fe4c/core/provider_objaverse.py#L127
+        # transform = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, self.opt.cam_radius], [0, 0, 0, 1]], dtype=torch.float32) @ torch.inverse(c[[0,4]])
+
+        repeated_homo_pcd = np.repeat(np.concatenate(
+            [pcd, np.ones_like(pcd[..., 0:1])], -1)[None],
+                                      2,
+                                      axis=0)[..., None]  # B N 4 1
+        new_pcd = (transform @ repeated_homo_pcd)[..., :3, 0]  # 2 N 3
+
+        return new_pcd
+
+    def canonicalize_pts_v6(self, c, pcd, for_encoder=True, canonical_idx=0):
+        exit()  # deprecated function
+        # pcd: sampled in world space
+
+        assert c.shape[0] == self.chunk_size
+        assert for_encoder
+        encoder_canonical_idx = [0, 6, 12, 18]
+
+        B = c.shape[0]
+        camera_poses = c[:, :16].reshape(B, 4, 4)  # 3x4
+
+        cam_radius = np.linalg.norm(
+            c[encoder_canonical_idx][:, :16].reshape(4, 4, 4)[:, :3, 3],
+            axis=-1,
+            keepdims=False)  # since g-buffer adopts dynamic radius here.
+        frame1_fixed_pos = np.repeat(np.eye(4)[None], 4, axis=0)
+        frame1_fixed_pos[:, 2, -1] = -cam_radius
+
+        transform = frame1_fixed_pos @ np.linalg.inv(
+            camera_poses[encoder_canonical_idx])  # B 4 4
+        transform = np.expand_dims(transform, axis=1)  # B 1 4 4
+        # from LGM, https://github.com/3DTopia/LGM/blob/fe8d12cff8c827df7bb77a3c8e8b37408cb6fe4c/core/provider_objaverse.py#L127
+        # transform = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, self.opt.cam_radius], [0, 0, 0, 1]], dtype=torch.float32) @ torch.inverse(c[[0,4]])
+
+        repeated_homo_pcd = np.repeat(np.concatenate(
+            [pcd, np.ones_like(pcd[..., 0:1])], -1)[None],
+                                      4,
+                                      axis=0)[..., None]  # B N 4 1
+        new_pcd = (transform @ repeated_homo_pcd)[..., :3, 0]  # 2 N 3
+
+        return new_pcd
+
+    def normalize_camera(self, c, for_encoder=True, canonical_idx=0):
+        assert c.shape[0] == self.chunk_size  # 8 o r10
+
+        B = c.shape[0]
+        camera_poses = c[:, :16].reshape(B, 4, 4)  # 3x4
+
+        if for_encoder:
+            encoder_canonical_idx = [0, self.V]
+            # st()
+            cam_radius = np.linalg.norm(
+                c[encoder_canonical_idx][:, :16].reshape(2, 4, 4)[:, :3, 3],
+                axis=-1,
+                keepdims=False)  # since g-buffer adopts dynamic radius here.
+            frame1_fixed_pos = np.repeat(np.eye(4)[None], 2, axis=0)
+            frame1_fixed_pos[:, 2, -1] = -cam_radius
+
+            transform = frame1_fixed_pos @ np.linalg.inv(
+                camera_poses[encoder_canonical_idx])
+            # from LGM, https://github.com/3DTopia/LGM/blob/fe8d12cff8c827df7bb77a3c8e8b37408cb6fe4c/core/provider_objaverse.py#L127
+            # transform = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, self.opt.cam_radius], [0, 0, 0, 1]], dtype=torch.float32) @ torch.inverse(c[[0,4]])
+
+            new_camera_poses = np.repeat(
+                transform, self.V, axis=0
+            ) @ camera_poses  # [V, 4, 4]. np.repeat() is th.repeat_interleave()
+
+        else:
+            cam_radius = np.linalg.norm(
+                c[canonical_idx][:16].reshape(4, 4)[:3, 3],
+                axis=-1,
+                keepdims=False)  # since g-buffer adopts dynamic radius here.
+            frame1_fixed_pos = np.eye(4)
+            frame1_fixed_pos[2, -1] = -cam_radius
+
+            transform = frame1_fixed_pos @ np.linalg.inv(
+                camera_poses[canonical_idx])  # 4,4
+            # from LGM, https://github.com/3DTopia/LGM/blob/fe8d12cff8c827df7bb77a3c8e8b37408cb6fe4c/core/provider_objaverse.py#L127
+            # transform = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, self.opt.cam_radius], [0, 0, 0, 1]], dtype=torch.float32) @ torch.inverse(c[[0,4]])
+
+            new_camera_poses = np.repeat(transform[None],
+                                         self.chunk_size,
+                                         axis=0) @ camera_poses  # [V, 4, 4]
+
+        c = np.concatenate([new_camera_poses.reshape(B, 16), c[:, 16:]],
+                           axis=-1)
+
+        return c
+
+    def normalize_camera_v6(self, c, for_encoder=True, canonical_idx=0):
+
+        B = c.shape[0]
+        camera_poses = c[:, :16].reshape(B, 4, 4)  # 3x4
+
+        if for_encoder:
+            assert c.shape[0] == 24
+            encoder_canonical_idx = [0, 6, 12, 18]
+            cam_radius = np.linalg.norm(
+                c[encoder_canonical_idx][:, :16].reshape(4, 4, 4)[:, :3, 3],
+                axis=-1,
+                keepdims=False)  # since g-buffer adopts dynamic radius here.
+            frame1_fixed_pos = np.repeat(np.eye(4)[None], 4, axis=0)
+            frame1_fixed_pos[:, 2, -1] = -cam_radius
+
+            transform = frame1_fixed_pos @ np.linalg.inv(
+                camera_poses[encoder_canonical_idx])
+            # from LGM, https://github.com/3DTopia/LGM/blob/fe8d12cff8c827df7bb77a3c8e8b37408cb6fe4c/core/provider_objaverse.py#L127
+            # transform = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, self.opt.cam_radius], [0, 0, 0, 1]], dtype=torch.float32) @ torch.inverse(c[[0,4]])
+
+            new_camera_poses = np.repeat(transform, 6,
+                                         axis=0) @ camera_poses  # [V, 4, 4]
+
+        else:
+            assert c.shape[0] == 12
+            cam_radius = np.linalg.norm(
+                c[canonical_idx][:16].reshape(4, 4)[:3, 3],
+                axis=-1,
+                keepdims=False)  # since g-buffer adopts dynamic radius here.
+            frame1_fixed_pos = np.eye(4)
+            frame1_fixed_pos[2, -1] = -cam_radius
+
+            transform = frame1_fixed_pos @ np.linalg.inv(
+                camera_poses[canonical_idx])  # 4,4
+            # from LGM, https://github.com/3DTopia/LGM/blob/fe8d12cff8c827df7bb77a3c8e8b37408cb6fe4c/core/provider_objaverse.py#L127
+            # transform = torch.tensor([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, self.opt.cam_radius], [0, 0, 0, 1]], dtype=torch.float32) @ torch.inverse(c[[0,4]])
+
+            new_camera_poses = np.repeat(transform[None], 12,
+                                         axis=0) @ camera_poses  # [V, 4, 4]
+
+        c = np.concatenate([new_camera_poses.reshape(B, 16), c[:, 16:]],
+                           axis=-1)
+
+        return c
+
+    def get_plucker_ray(self, c):
+        rays_plucker = []
+        for idx in range(c.shape[0]):
+            rays_o, rays_d = self.gen_rays(c[idx])
+            rays_plucker.append(
+                torch.cat([torch.cross(rays_o, rays_d, dim=-1), rays_d],
+                          dim=-1).permute(2, 0, 1))  # [h, w, 6] -> 6,h,w
+        rays_plucker = torch.stack(rays_plucker, 0)
+        return rays_plucker
+
+    def _unproj_depth_given_c(self, c, depth):
+        # get xyz hxw for each pixel, like MCC
+        # img_size = self.reso
+        img_size = depth.shape[-1]
+
+        B = c.shape[0]
+
+        cam2world_matrix = c[:, :16].reshape(B, 4, 4)
+        intrinsics = c[:, 16:25].reshape(B, 3, 3)
+
+        ray_origins, ray_directions = self.ray_sampler(  # shape: 
+            cam2world_matrix, intrinsics, img_size)[:2]
+
+        depth = depth.reshape(B, -1).unsqueeze(-1)
+
+        xyz = ray_origins + depth * ray_directions  # BV HW 3, already in the world space
+        xyz = xyz.reshape(B, img_size, img_size, 3).permute(0, 3, 1,
+                                                            2)  # B 3 H W
+        xyz = xyz.clip(
+            -0.45, 0.45)  # g-buffer saves depth with anti-alias = True .....
+        xyz = torch.where(xyz.abs() == 0.45, 0, xyz)  # no boundary here? Yes.
+
+        return xyz
+
+    def _post_process_sample_batch(self, data_sample):
+        # raw_img, depth, c, bbox, caption, ins = data_sample
+
+        alpha = None
+        if len(data_sample) == 4:
+            raw_img, depth, c, bbox = data_sample
+        else:
+            raw_img, depth, c, alpha, bbox = data_sample  # put c to position 2
+
+        if isinstance(depth, tuple):
+            self.append_normal = True
+            depth, normal = depth
+        else:
+            self.append_normal = False
+            normal = None
+
+        # if raw_img.shape[-1] == 4:
+        #     depth_reso, _ = resize_depth_mask_Tensor(
+        #         torch.from_numpy(depth), self.reso)
+        #     raw_img, fg_mask_reso = raw_img[..., :3], raw_img[..., -1]
+        #     # st() # ! check has 1 dim in alpha?
+        # else:
+        if not isinstance(depth, torch.Tensor):
+            depth = torch.from_numpy(depth).float()
+        else:
+            depth = depth.float()
+
+        depth_reso, fg_mask_reso = resize_depth_mask_Tensor(depth, self.reso)
+
+        if alpha is None:
+            alpha = fg_mask_reso
+        else:
+            # ! resize first
+            # st()
+            alpha = torch.from_numpy(alpha / 255.0).float()
+            if alpha.shape[-1] != self.reso:  # bilinear inteprolate reshape
+                alpha = torch.nn.functional.interpolate(
+                    input=alpha.unsqueeze(1),
+                    size=(self.reso, self.reso),
+                    mode='bilinear',
+                    align_corners=False,
+                ).squeeze(1)
+
+        if self.reso < 256:
+            bbox = (bbox * (self.reso / 256)).astype(
+                np.uint8)  # normalize bbox to the reso range
+        else:  # 3dgs
+            bbox = bbox.astype(np.uint8)
+
+        # st() # ! shall compat with 320 input
+
+        # assert raw_img.shape[-2] == self.reso_encoder
+
+        # img_to_encoder = cv2.resize(
+        #     raw_img, (self.reso_encoder, self.reso_encoder),
+        #     interpolation=cv2.INTER_LANCZOS4)
+        # else:
+        # img_to_encoder = raw_img
+
+        raw_img = torch.from_numpy(raw_img).permute(0, 3, 1,
+                                                    2) / 255.0  # [0,1]
+
+        if normal is not None:
+            normal = torch.from_numpy(normal).permute(0,3,1,2)
+
+        # if raw_img.shape[-1] != self.reso:
+
+
+        if raw_img.shape[1] != self.reso_encoder:
+            img_to_encoder = torch.nn.functional.interpolate(
+                input=raw_img,
+                size=(self.reso_encoder, self.reso_encoder),
+                mode='bilinear',
+                align_corners=False,)
+            img_to_encoder = self.normalize(img_to_encoder)
+
+            if normal is not None:
+                normal_for_encoder = torch.nn.functional.interpolate(
+                    input=normal,
+                    size=(self.reso_encoder, self.reso_encoder),
+                    # mode='bilinear',
+                    mode='nearest',
+                    # align_corners=False,
+                )
+
+        else:
+            img_to_encoder = self.normalize(raw_img)
+            normal_for_encoder = normal
+
+        if raw_img.shape[-1] != self.reso:
+            img = torch.nn.functional.interpolate(
+                input=raw_img,
+                size=(self.reso, self.reso),
+                mode='bilinear',
+                align_corners=False,
+            )  # [-1,1] range
+            img = img * 2 - 1  # as gt
+
+            if normal is not None:
+                normal = torch.nn.functional.interpolate(
+                    input=normal,
+                    size=(self.reso, self.reso),
+                    # mode='bilinear',
+                    mode='nearest',
+                    # align_corners=False,
+                )
+
+        else:
+            img = raw_img * 2 - 1
+        
+
+        # fg_mask_reso = depth[..., -1:] # ! use
+
+        pad_v6_fn = lambda x: torch.concat([x, x[:4]], 0) if isinstance(
+            x, torch.Tensor) else np.concatenate([x, x[:4]], 0)
+
+        # ! processing encoder input image.
+
+        # ! normalize camera feats
+        if self.frame_0_as_canonical:  # 4 views as input per batch
+
+            # if self.chunk_size in [8, 10]:
+            if True:
+                # encoder_canonical_idx = [0, 4]
+                # encoder_canonical_idx = [0, self.chunk_size//2]
+                encoder_canonical_idx = [0, self.V]
+
+                c_for_encoder = self.normalize_camera(c, for_encoder=True)
+                c_for_render = self.normalize_camera(
+                    c,
+                    for_encoder=False,
+                    canonical_idx=encoder_canonical_idx[0]
+                )  # allocated to nv_c, frame0 (in 8 views) as the canonical
+                c_for_render_nv = self.normalize_camera(
+                    c,
+                    for_encoder=False,
+                    canonical_idx=encoder_canonical_idx[1]
+                )  # allocated to nv_c, frame0 (in 8 views) as the canonical
+                c_for_render = np.concatenate([c_for_render, c_for_render_nv],
+                                              axis=-1)  # for compat
+                # st()
+
+        else:  # use g-buffer canonical c
+            c_for_encoder, c_for_render = c, c
+
+        if self.append_normal and normal is not None:
+            img_to_encoder = torch.cat([img_to_encoder, normal_for_encoder],
+            # img_to_encoder = torch.cat([img_to_encoder, normal],
+                                       1)  # concat in C dim
+
+        if self.plucker_embedding:
+            # rays_plucker = self.get_plucker_ray(c)
+            rays_plucker = self.get_plucker_ray(c_for_encoder)
+            img_to_encoder = torch.cat([img_to_encoder, rays_plucker],
+                                       1)  # concat in C dim
+
+        # torchvision.utils.save_image(raw_img, 'tmp/inp.png', normalize=True, value_range=(0,1), nrow=1, padding=0)
+        # torchvision.utils.save_image(rays_plucker[:,:3], 'tmp/plucker.png', normalize=True, value_range=(-1,1), nrow=1, padding=0)
+        # torchvision.utils.save_image(depth_reso.unsqueeze(1), 'tmp/depth.png', normalize=True, nrow=1, padding=0)
+
+        c = torch.from_numpy(c_for_render).to(torch.float32)
+
+        if self.append_depth:
+            # normalized_depth = torch.from_numpy(depth_reso).clone().unsqueeze(
+            #     1)  # min=0
+            normalized_depth = depth_reso.clone().unsqueeze(
+                1)
+            img_to_encoder = torch.cat([img_to_encoder, normalized_depth],
+                                       1)  # concat in C dim
+        elif self.append_xyz:
+            depth_for_unproj = depth.clone()
+            depth_for_unproj[depth_for_unproj ==
+                  0] = 1e10  # so that rays_o will not appear in the final pcd.
+            xyz = self._unproj_depth_given_c(c.float(), depth)
+            # pcu.save_mesh_v(f'unproj_xyz_before_Nearest.ply', xyz[0:9].float().detach().permute(0,2,3,1).reshape(-1,3).cpu().numpy(),)
+
+            if xyz.shape[-1] != self.reso_encoder:
+                xyz = torch.nn.functional.interpolate(
+                    input=xyz,  # [-1,1]
+                    # size=(self.reso, self.reso),
+                    size=(self.reso_encoder, self.reso_encoder),
+                    mode='nearest',
+                )
+
+            # pcu.save_mesh_v(f'unproj_xyz_afterNearest.ply', xyz[0:9].float().detach().permute(0,2,3,1).reshape(-1,3).cpu().numpy(),)
+            # st()
+            img_to_encoder = torch.cat([img_to_encoder, xyz], 1)
+
+        return (img_to_encoder, img, alpha, depth_reso, c,
+                torch.from_numpy(bbox))
+
+    def rand_sample_idx(self):
+        return random.randint(0, self.instance_data_length - 1)
+
+    def rand_pair(self):
+        return (self.rand_sample_idx() for _ in range(2))
+
+    def paired_post_process(self, sample):
+        # repeat n times?
+        all_inp_list = []
+        all_nv_list = []
+        caption, ins = sample[-2:]
+        # expanded_return = []
+        for _ in range(self.pair_per_instance):
+            cano_idx, nv_idx = self.rand_pair()
+            cano_sample = self._post_process_sample(item[cano_idx]
+                                                    for item in sample[:-2])
+            nv_sample = self._post_process_sample(item[nv_idx]
+                                                  for item in sample[:-2])
+            all_inp_list.extend(cano_sample)
+            all_nv_list.extend(nv_sample)
+        return (*all_inp_list, *all_nv_list, caption, ins)
+        # return [cano_sample, nv_sample, caption, ins]
+        # return (*cano_sample, *nv_sample, caption, ins)
+
+    def get_source_cw2wT(self, source_cameras_view_to_world):
+        return matrix_to_quaternion(
+            source_cameras_view_to_world[:3, :3].transpose(0, 1))
+
+    def c_to_3dgs_format(self, pose):
+        # TODO, switch to torch version (batched later)
+
+        c2w = pose[:16].reshape(4, 4)  # 3x4
+
+        # ! load cam
+        w2c = np.linalg.inv(c2w)
+        R = np.transpose(
+            w2c[:3, :3])  # R is stored transposed due to 'glm' in CUDA code
+        T = w2c[:3, 3]
+        fx = pose[16]
+        FovX = focal2fov(fx, 1)
+        FovY = focal2fov(fx, 1)
+
+        tanfovx = math.tan(FovX * 0.5)
+        tanfovy = math.tan(FovY * 0.5)
+
+        assert tanfovx == tanfovy
+
+        trans = np.array([0.0, 0.0, 0.0])
+        scale = 1.0
+
+        view_world_transform = torch.tensor(getView2World(R, T, trans,
+                                                          scale)).transpose(
+                                                              0, 1)
+
+        world_view_transform = torch.tensor(getWorld2View2(R, T, trans,
+                                                           scale)).transpose(
+                                                               0, 1)
+        projection_matrix = getProjectionMatrix(znear=self.znear,
+                                                zfar=self.zfar,
+                                                fovX=FovX,
+                                                fovY=FovY).transpose(0, 1)
+        full_proj_transform = (world_view_transform.unsqueeze(0).bmm(
+            projection_matrix.unsqueeze(0))).squeeze(0)
+        camera_center = world_view_transform.inverse()[3, :3]
+
+        # item.update(viewpoint_cam=[viewpoint_cam])
+        c = {}
+        #
+        c["source_cv2wT_quat"] = self.get_source_cw2wT(view_world_transform)
+        c.update(
+            # projection_matrix=projection_matrix, # K
+            cam_view=world_view_transform,  # world_view_transform
+            cam_view_proj=full_proj_transform,  # full_proj_transform
+            cam_pos=camera_center,
+            tanfov=tanfovx,  # TODO, fix in the renderer
+            orig_pose=torch.from_numpy(pose),
+            orig_c2w=torch.from_numpy(c2w),
+            orig_w2c=torch.from_numpy(w2c),
+            orig_intrin=torch.from_numpy(pose[16:]).reshape(3,3),
+            # tanfovy=tanfovy,
+        )
+
+        return c  # dict for gs rendering
+
+    def paired_post_process_chunk(self, sample):
+        # st()
+
+        # sample_npz, ins, caption = sample_pyd # three items
+        # sample = *(sample[0][k] for k in ['raw_img', 'depth', 'c', 'bbox']), sample[-1], sample[-2]
+
+        # repeat n times?
+        all_inp_list = []
+        all_nv_list = []
+        auxiliary_sample = list(sample[-2:])
+        # caption, ins = sample[-2:]
+        ins = sample[-1]
+
+        assert sample[0].shape[0] == self.chunk_size  # random chunks
+        # expanded_return = []
+
+        if self.load_pcd:
+            # fps_pcd = pcu.load_mesh_v(
+            #     # str(self.pcd_path / ins / 'fps-24576.ply'))  # N, 3
+            #     str(self.pcd_path / ins / 'fps-4096.ply'))  # N, 3
+            # #   'fps-4096.ply'))  # N, 3
+            fps_pcd = trimesh.load(str(self.pcd_path / ins / 'fps-4096.ply')).vertices
+
+            auxiliary_sample += [fps_pcd]
+
+        assert self.duplicate_sample
+        # st()
+        if self.duplicate_sample:
+            # ! shuffle before process, since frame_0_as_canonical fixed c.
+
+            if self.chunk_size in [20, 18, 16, 12]:
+                shuffle_sample = sample[:-2]  # no order shuffle required
+            else:
+                shuffle_sample = []
+                # indices = torch.randperm(self.chunk_size)
+                indices = np.random.permutation(self.chunk_size)
+                for _, item in enumerate(sample[:-2]):
+                    shuffle_sample.append(item[indices])  # random shuffle
+
+            processed_sample = self._post_process_sample_batch(shuffle_sample)
+
+            # ! process pcd if frmae_0 alignment
+
+            if self.load_pcd:
+                if self.frame_0_as_canonical:
+                    # ! normalize camera feats
+
+                    # normalized camera feats as in paper (transform the first pose to a fixed position)
+                    # if self.chunk_size == 20:
+                    #     auxiliary_sample[-1] = self.canonicalize_pts_v6(
+                    #         c=shuffle_sample[2],
+                    #         pcd=auxiliary_sample[-1],
+                    #         for_encoder=True)  # B N 3
+                    # else:
+                    auxiliary_sample[-1] = self.canonicalize_pts(
+                        c=shuffle_sample[2],
+                        pcd=auxiliary_sample[-1],
+                        for_encoder=True)  # B N 3
+                else:
+                    auxiliary_sample[-1] = np.repeat(
+                        auxiliary_sample[-1][None], 2,
+                        axis=0)  # share the same camera syste, just repeat
+
+            assert not self.orthog_duplicate
+
+            # if self.chunk_size == 8:
+            all_inp_list.extend(item[:self.V] for item in processed_sample)
+            all_nv_list.extend(item[self.V:] for item in processed_sample)
+
+            # elif self.chunk_size == 20:  # V=6
+            #     # indices_v6 = [np.random.permutation(self.chunk_size)[:12] for _ in range(2)] # random sample 6 views from chunks
+            #     all_inp_list.extend(item[:12] for item in processed_sample)
+            #     # indices_v6 = np.concatenate([np.arange(12, 20), np.arange(0,4)])
+            #     all_nv_list.extend(
+            #         item[12:] for item in
+            #         processed_sample)  # already repeated inside batch fn
+            # else:
+            #     raise NotImplementedError(self.chunk_size)
+
+            # else:
+            #     all_inp_list.extend(item[:8] for item in processed_sample)
+            #     all_nv_list.extend(item[8:] for item in processed_sample)
+
+            # st()
+
+            return (*all_inp_list, *all_nv_list, *auxiliary_sample)
+
+        else:
+            processed_sample = self._post_process_sample_batch(  # avoid shuffle shorten processing time
+                item[:4] for item in sample[:-2])
+
+            all_inp_list.extend(item for item in processed_sample)
+            all_nv_list.extend(item
+                               for item in processed_sample)  # ! placeholder
+
+        # return (*all_inp_list, *all_nv_list, caption, ins)
+        return (*all_inp_list, *all_nv_list, *auxiliary_sample)
+
+        # randomly shuffle 8 views, avoid overfitting
+
+    def single_sample_create_dict_noBatch(self, sample, prefix=''):
+        # if len(sample) == 1:
+        #     sample = sample[0]
+        # assert len(sample) == 6
+        img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox = sample
+
+        if self.gs_cam_format:
+            # TODO, can optimize later after model converges
+            B, V, _ = c.shape  # B 4 25
+            c = rearrange(c, 'B V C -> (B V) C').cpu().numpy()
+            # c = c.cpu().numpy()
+            all_gs_c = [self.c_to_3dgs_format(pose) for pose in c]
+            # st()
+            # all_gs_c = self.c_to_3dgs_format(c.cpu().numpy())
+            c = {
+                k:
+                rearrange(torch.stack([gs_c[k] for gs_c in all_gs_c]),
+                          '(B V) ... -> B V ...',
+                          B=B,
+                          V=V)
+                # torch.stack([gs_c[k] for gs_c in all_gs_c])
+                if isinstance(all_gs_c[0][k], torch.Tensor) else all_gs_c[0][k]
+                for k in all_gs_c[0].keys()
+            }
+            # c = collate_gs_c
+
+        return {
+            # **sample,
+            f'{prefix}img_to_encoder': img_to_encoder,
+            f'{prefix}img': img,
+            f'{prefix}depth_mask': fg_mask_reso,
+            f'{prefix}depth': depth_reso,
+            f'{prefix}c': c,
+            f'{prefix}bbox': bbox,
+        }
+
+    def single_sample_create_dict(self, sample, prefix=''):
+        # if len(sample) == 1:
+        #     sample = sample[0]
+        # assert len(sample) == 6
+        img_to_encoder, img, fg_mask_reso, depth_reso, c, bbox = sample
+
+        if self.gs_cam_format:
+            # TODO, can optimize later after model converges
+            B, V, _ = c.shape  # B 4 25
+            c = rearrange(c, 'B V C -> (B V) C').cpu().numpy()
+            all_gs_c = [self.c_to_3dgs_format(pose) for pose in c]
+            c = {
+                k:
+                rearrange(torch.stack([gs_c[k] for gs_c in all_gs_c]),
+                          '(B V) ... -> B V ...',
+                          B=B,
+                          V=V)
+                if isinstance(all_gs_c[0][k], torch.Tensor) else all_gs_c[0][k]
+                for k in all_gs_c[0].keys()
+            }
+            # c = collate_gs_c
+
+        return {
+            # **sample,
+            f'{prefix}img_to_encoder': img_to_encoder,
+            f'{prefix}img': img,
+            f'{prefix}depth_mask': fg_mask_reso,
+            f'{prefix}depth': depth_reso,
+            f'{prefix}c': c,
+            f'{prefix}bbox': bbox,
+        }
+
+    def single_instance_sample_create_dict(self, sample, prfix=''):
+        assert len(sample) == 42
+
+        inp_sample_list = [[] for _ in range(6)]
+
+        for item in sample[:40]:
+            for item_idx in range(6):
+                inp_sample_list[item_idx].append(item[0][item_idx])
+
+        inp_sample = self.single_sample_create_dict(
+            (torch.stack(item_list) for item_list in inp_sample_list),
+            prefix='')
+
+        return {
+            **inp_sample,  # 
+            'caption': sample[-2],
+            'ins': sample[-1]
+        }
+
+    def decode_gzip(self, sample_pyd, shape=(256, 256)):
+        # sample_npz, ins, caption = sample_pyd # three items
+        # c, bbox, depth, ins, caption, raw_img = sample_pyd[:5], sample_pyd[5:]
+
+        # wds.to_tuple('raw_img.jpeg', 'depth.jpeg',
+        # 'd_near.npy',
+        # 'd_far.npy',
+        # "c.npy", 'bbox.npy', 'ins.txt', 'caption.txt'),
+
+        # raw_img, depth, alpha_mask, d_near, d_far, c, bbox, ins, caption = sample_pyd
+        raw_img, depth_alpha, = sample_pyd
+        # return raw_img, depth_alpha
+        # raw_img, caption = sample_pyd
+        # return raw_img, caption
+        # st()
+        raw_img = rearrange(raw_img, 'h (b w) c -> b h w c', b=self.chunk_size)
+
+        depth = rearrange(depth, 'h (b w) c -> b h w c', b=self.chunk_size)
+
+        alpha_mask = rearrange(
+            alpha_mask, 'h (b w) c -> b h w c', b=self.chunk_size) / 255.0
+
+        d_far = d_far.reshape(self.chunk_size, 1, 1, 1)
+        d_near = d_near.reshape(self.chunk_size, 1, 1, 1)
+        # d = 1 / ( (d_normalized / 255) * (far-near) + near)
+        depth = 1 / ((depth / 255) * (d_far - d_near) + d_near)
+        depth = depth[..., 0]  # decoded from jpeg
+
+        # depth = decompress_array(depth['depth'], (self.chunk_size, *shape),
+        #                          np.float32,
+        #                          decompress=True,
+        #                          decompress_fn=lz4.frame.decompress)
+
+        # return raw_img, depth, d_near, d_far,  c, bbox, caption, ins
+
+        raw_img = np.concatenate([raw_img, alpha_mask[..., 0:1]], -1)
+
+        return raw_img, depth, c, bbox, caption, ins
+
+    def decode_zip(
+        self,
+        sample_pyd,
+    ):
+        shape = (self.reso_encoder, self.reso_encoder)
+        if isinstance(sample_pyd, tuple):
+            sample_pyd = sample_pyd[0]
+        assert isinstance(sample_pyd, dict)
+
+        raw_img = decompress_and_open_image_gzip(
+            sample_pyd['raw_img'],
+            is_img=True,
+            decompress=True,
+            decompress_fn=lz4.frame.decompress)
+
+        caption = sample_pyd['caption'].decode('utf-8')
+        ins = sample_pyd['ins'].decode('utf-8')
+
+        c = decompress_array(sample_pyd['c'], (
+            self.chunk_size,
+            25,
+        ),
+                             np.float32,
+                             decompress=True,
+                             decompress_fn=lz4.frame.decompress)
+
+        bbox = decompress_array(
+            sample_pyd['bbox'],
+            (
+                self.chunk_size,
+                4,
+            ),
+            np.float32,
+            # decompress=False)
+            decompress=True,
+            decompress_fn=lz4.frame.decompress)
+
+        if self.decode_encode_img_only:
+            depth = np.zeros(shape=(self.chunk_size,
+                                    *shape))  # save loading time
+        else:
+            depth = decompress_array(sample_pyd['depth'],
+                                     (self.chunk_size, *shape),
+                                     np.float32,
+                                     decompress=True,
+                                     decompress_fn=lz4.frame.decompress)
+
+        # return {'raw_img': raw_img, 'depth': depth, 'bbox': bbox, 'caption': caption, 'ins': ins, 'c': c}
+        # return raw_img, depth, c, bbox, caption, ins
+        # return raw_img, bbox, caption, ins
+        # return bbox, caption, ins
+        return raw_img, depth, c, bbox, caption, ins
+        # ! run single-instance pipeline first
+        # return raw_img[0], depth[0], c[0], bbox[0], caption, ins
+
+    def create_dict_nobatch(self, sample):
+        # sample = [item[0] for item in sample] # wds wrap items in []
+
+        sample_length = 6
+        # if self.load_pcd:
+        #     sample_length += 1
+
+        cano_sample_list = [[] for _ in range(sample_length)]
+        nv_sample_list = [[] for _ in range(sample_length)]
+        # st()
+        # bs = (len(sample)-2) // 6
+        for idx in range(0, self.pair_per_instance):
+
+            cano_sample = sample[sample_length * idx:sample_length * (idx + 1)]
+            nv_sample = sample[sample_length * self.pair_per_instance +
+                               sample_length * idx:sample_length *
+                               self.pair_per_instance + sample_length *
+                               (idx + 1)]
+
+            for item_idx in range(sample_length):
+                if self.frame_0_as_canonical:
+                    # ! cycle input/output view for more pairs
+                    if item_idx == 4:
+                        cano_sample_list[item_idx].append(
+                            cano_sample[item_idx][..., :25])
+                        nv_sample_list[item_idx].append(
+                            nv_sample[item_idx][..., :25])
+
+                        cano_sample_list[item_idx].append(
+                            nv_sample[item_idx][..., 25:])
+                        nv_sample_list[item_idx].append(
+                            cano_sample[item_idx][..., 25:])
+
+                    else:
+                        cano_sample_list[item_idx].append(
+                            cano_sample[item_idx])
+                        nv_sample_list[item_idx].append(nv_sample[item_idx])
+
+                        cano_sample_list[item_idx].append(nv_sample[item_idx])
+                        nv_sample_list[item_idx].append(cano_sample[item_idx])
+
+                else:
+                    cano_sample_list[item_idx].append(cano_sample[item_idx])
+                    nv_sample_list[item_idx].append(nv_sample[item_idx])
+
+                    cano_sample_list[item_idx].append(nv_sample[item_idx])
+                    nv_sample_list[item_idx].append(cano_sample[item_idx])
+
+        cano_sample = self.single_sample_create_dict_noBatch(
+            (torch.stack(item_list, 0) for item_list in cano_sample_list),
+            prefix=''
+        )  # torch.Size([5, 10, 256, 256]). Since no batch dim here for now.
+
+        nv_sample = self.single_sample_create_dict_noBatch(
+            (torch.stack(item_list, 0) for item_list in nv_sample_list),
+            prefix='nv_')
+
+        ret_dict = {
+            **cano_sample,
+            **nv_sample,
+        }
+
+        if not self.load_pcd:
+            ret_dict.update({'caption': sample[-2], 'ins': sample[-1]})
+
+        else:
+            # if self.frame_0_as_canonical:
+            #     # fps_pcd = rearrange( sample[-1], 'B V ... -> (B V) ...')  # ! wrong order.
+            #     # if self.chunk_size == 8:
+            #     fps_pcd = rearrange(
+            #         sample[-1], 'B V ... -> (V B) ...')  # mimic torch.repeat
+            #     # else:
+            #     #     fps_pcd = rearrange( sample[-1], 'B V ... -> (B V) ...')  # ugly code to match the input format...
+            # else:
+            #     fps_pcd = sample[-1].repeat(
+            #         2, 1,
+            #         1)  # mimic torch.cat(), from torch.Size([3, 4096, 3])
+
+            # ! TODO, check fps_pcd order
+
+            ret_dict.update({
+                'caption': sample[-3],
+                'ins': sample[-2],
+                'fps_pcd': sample[-1]
+            })
+
+        return ret_dict
+
+    def create_dict(self, sample):
+        # sample = [item[0] for item in sample] # wds wrap items in []
+        # st()
+
+        sample_length = 6
+        # if self.load_pcd:
+        #     sample_length += 1
+
+        cano_sample_list = [[] for _ in range(sample_length)]
+        nv_sample_list = [[] for _ in range(sample_length)]
+        # st()
+        # bs = (len(sample)-2) // 6
+        for idx in range(0, self.pair_per_instance):
+
+            cano_sample = sample[sample_length * idx:sample_length * (idx + 1)]
+            nv_sample = sample[sample_length * self.pair_per_instance +
+                               sample_length * idx:sample_length *
+                               self.pair_per_instance + sample_length *
+                               (idx + 1)]
+
+            for item_idx in range(sample_length):
+                if self.frame_0_as_canonical:
+                    # ! cycle input/output view for more pairs
+                    if item_idx == 4:
+                        cano_sample_list[item_idx].append(
+                            cano_sample[item_idx][..., :25])
+                        nv_sample_list[item_idx].append(
+                            nv_sample[item_idx][..., :25])
+
+                        cano_sample_list[item_idx].append(
+                            nv_sample[item_idx][..., 25:])
+                        nv_sample_list[item_idx].append(
+                            cano_sample[item_idx][..., 25:])
+
+                    else:
+                        cano_sample_list[item_idx].append(
+                            cano_sample[item_idx])
+                        nv_sample_list[item_idx].append(nv_sample[item_idx])
+
+                        cano_sample_list[item_idx].append(nv_sample[item_idx])
+                        nv_sample_list[item_idx].append(cano_sample[item_idx])
+
+                else:
+                    cano_sample_list[item_idx].append(cano_sample[item_idx])
+                    nv_sample_list[item_idx].append(nv_sample[item_idx])
+
+                    cano_sample_list[item_idx].append(nv_sample[item_idx])
+                    nv_sample_list[item_idx].append(cano_sample[item_idx])
+
+        # if self.split_chunk_input:
+        #     cano_sample = self.single_sample_create_dict(
+        #         (torch.cat(item_list, 0) for item_list in cano_sample_list),
+        #         prefix='')
+        #     nv_sample = self.single_sample_create_dict(
+        #         (torch.cat(item_list, 0) for item_list in nv_sample_list),
+        #         prefix='nv_')
+
+    # else:
+
+    # st()
+        cano_sample = self.single_sample_create_dict(
+            (torch.cat(item_list, 0) for item_list in cano_sample_list),
+            prefix='')  # torch.Size([4, 4, 10, 256, 256])
+
+        nv_sample = self.single_sample_create_dict(
+            (torch.cat(item_list, 0) for item_list in nv_sample_list),
+            prefix='nv_')
+
+        ret_dict = {
+            **cano_sample,
+            **nv_sample,
+        }
+
+        if not self.load_pcd:
+            ret_dict.update({'caption': sample[-2], 'ins': sample[-1]})
+
+        else:
+            if self.frame_0_as_canonical:
+                # fps_pcd = rearrange( sample[-1], 'B V ... -> (B V) ...')  # ! wrong order.
+                # if self.chunk_size == 8:
+                fps_pcd = rearrange(
+                    sample[-1], 'B V ... -> (V B) ...')  # mimic torch.repeat
+                # else:
+                #     fps_pcd = rearrange( sample[-1], 'B V ... -> (B V) ...')  # ugly code to match the input format...
+            else:
+                fps_pcd = sample[-1].repeat(
+                    2, 1,
+                    1)  # mimic torch.cat(), from torch.Size([3, 4096, 3])
+
+            ret_dict.update({
+                'caption': sample[-3],
+                'ins': sample[-2],
+                'fps_pcd': fps_pcd
+            })
+
+        return ret_dict
+
+    def prepare_mv_input(self, sample):
+
+        # sample = [item[0] for item in sample] # wds wrap items in []
+        bs = len(sample['caption'])  # number of instances
+        chunk_size = sample['img'].shape[0] // bs
+
+        assert self.split_chunk_input
+
+        for k, v in sample.items():
+            if isinstance(v, torch.Tensor) and k != 'fps_pcd':
+                sample[k] = rearrange(v, "b f c ... -> (b f) c ...",
+                                      f=self.V).contiguous()
+
+        # # ! shift nv
+        # else:
+        #     for k, v in sample.items():
+        #         if k not in ['ins', 'caption']:
+
+        #             rolled_idx = torch.LongTensor(
+        #                 list(
+        #                     itertools.chain.from_iterable(
+        #                         list(range(i, sample['img'].shape[0], bs))
+        #                         for i in range(bs))))
+
+        #             v = torch.index_select(v, dim=0, index=rolled_idx)
+        #         sample[k] = v
+
+        #     # img = sample['img']
+        #     # gt = sample['nv_img']
+        #     # torchvision.utils.save_image(img[0], 'inp.jpg', normalize=True)
+        #     # torchvision.utils.save_image(gt[0], 'nv.jpg', normalize=True)
+
+        #     for k, v in sample.items():
+        #         if 'nv' in k:
+        #             rolled_idx = torch.LongTensor(
+        #                 list(
+        #                     itertools.chain.from_iterable(
+        #                         list(
+        #                             np.roll(
+        #                                 np.arange(i * chunk_size, (i + 1) *
+        #                                           chunk_size), 4)
+        #                             for i in range(bs)))))
+
+        #             v = torch.index_select(v, dim=0, index=rolled_idx)
+        #             sample[k] = v
+
+        # torchvision.utils.save_image(sample['nv_img'], 'nv.png', normalize=True)
+        # torchvision.utils.save_image(sample['img'], 'inp.png', normalize=True)
+
+        return sample
 
 
 def load_dataset(
@@ -150,6 +1328,38 @@ def load_dataset(
                         shuffle=False)
     return loader
 
+def chunk_collate_fn(sample):
+    sample = torch.utils.data.default_collate(sample)
+    # ! change from stack to cat
+    # sample = self.post_process.prepare_mv_input(sample)
+
+    bs = len(sample['caption'])  # number of instances
+    # chunk_size = sample['img'].shape[0] // bs
+
+    def merge_internal_batch(sample, merge_b_only=False):
+        for k, v in sample.items():
+            if isinstance(v, torch.Tensor):
+                if v.ndim > 1:
+                    if k == 'fps_pcd' or merge_b_only:
+                        sample[k] = rearrange(
+                            v,
+                            "b1 b2 ... -> (b1 b2) ...").float().contiguous()
+
+                    else:
+                        sample[k] = rearrange(
+                            v, "b1 b2 f c ... -> (b1 b2 f) c ...").float(
+                            ).contiguous()
+                elif k == 'tanfov':
+                    sample[k] = v[0].float().item()  # tanfov.
+
+    if isinstance(sample['c'], dict):  # 3dgs
+        merge_internal_batch(sample['c'], merge_b_only=True)
+        merge_internal_batch(sample['nv_c'], merge_b_only=True)
+
+    merge_internal_batch(sample)
+
+    return sample
+
 
 def load_data(
         file_path="",
@@ -165,10 +1375,13 @@ def load_data(
         trainer_name='input_rec',
         use_lmdb=False,
         use_wds=False,
+        use_chunk=False,
         use_lmdb_compressed=False,
-        plucker_embedding=False,
-        infi_sampler=True):
+        # plucker_embedding=False,
+        infi_sampler=True, 
+        **kwargs):
 
+    collate_fn = None
     if use_lmdb:
         logger.log('using LMDB dataset')
         # dataset_cls = LMDBDataset_MV #  2.5-3iter/s, but unstable, drops to 1 later.
@@ -183,6 +1396,9 @@ def load_data(
                 dataset_cls = Objv_LMDBDataset_NV_NoCompressed  #  2.5-3iter/s, but unstable, drops to 1 later.
             else:
                 dataset_cls = Objv_LMDBDataset_MV_NoCompressed  #  2.5-3iter/s, but unstable, drops to 1 later.
+    elif use_chunk:
+        dataset_cls = ChunkObjaverseDataset
+        collate_fn = chunk_collate_fn
 
     else:
         if 'nv' in trainer_name:
@@ -191,14 +1407,26 @@ def load_data(
             dataset_cls = MultiViewObjverseDataset
 
     dataset = dataset_cls(file_path,
-                          reso,
-                          reso_encoder,
-                          test=False,
-                          preprocess=preprocess,
-                          load_depth=load_depth,
-                          imgnet_normalize=imgnet_normalize,
-                          dataset_size=dataset_size,
-                          plucker_embedding=plucker_embedding)
+                        reso,
+                        reso_encoder,
+                        test=False,
+                        preprocess=preprocess,
+                        load_depth=load_depth,
+                        imgnet_normalize=imgnet_normalize,
+                        dataset_size=dataset_size,
+                        **kwargs
+                        #   plucker_embedding=plucker_embedding
+                        )
+
+    # dataset = dataset_cls(file_path,
+    #                       reso,
+    #                       reso_encoder,
+    #                       test=False,
+    #                       preprocess=preprocess,
+    #                       load_depth=load_depth,
+    #                       imgnet_normalize=imgnet_normalize,
+    #                       dataset_size=dataset_size,
+    #                       plucker_embedding=plucker_embedding)
 
     logger.log('dataset_cls: {}, dataset size: {}'.format(
         trainer_name, len(dataset)))
@@ -216,7 +1444,8 @@ def load_data(
                             drop_last=True,
                             pin_memory=True,
                             persistent_workers=num_workers > 0,
-                            sampler=train_sampler)
+                            sampler=train_sampler,
+                            collate_fn=collate_fn)
 
         while True:
             yield from loader
@@ -1050,6 +2279,253 @@ class MultiViewObjverseDataset(Dataset):
         })
 
         return ret_dict
+
+
+# TODO merge all the useful APIs together
+class ChunkObjaverseDataset(Dataset):
+
+    def __init__(
+            self,
+            file_path,
+            reso,
+            reso_encoder,
+            preprocess=None,
+            classes=False,
+            load_depth=False,
+            test=False,
+            scene_scale=1,
+            overfitting=False,
+            imgnet_normalize=True,
+            dataset_size=-1,
+            overfitting_bs=-1,
+            interval=1,
+            plucker_embedding=True,
+            shuffle_across_cls=False,
+            wds_split=1,  # 4 splits to accelerate preprocessing
+            four_view_for_latent=False,
+            single_view_for_i23d=False,
+            load_extra_36_view=False,
+            gs_cam_format=False,
+            frame_0_as_canonical=True,
+            split_chunk_size=10,
+            mv_input=True,
+            append_depth=False,
+            append_xyz=False,
+            wds_split_all=1,
+            pcd_path=None,
+            load_pcd=False,
+            read_normal=False,
+            load_raw=False,
+            load_instance_only=False,
+            mv_latent_dir='',
+            perturb_pcd_scale=0.0,
+            # shards_folder_num=4,
+            # eval=False,
+            **kwargs):
+
+        super().__init__()
+
+        # st()
+        self.mv_latent_dir = mv_latent_dir
+
+        self.load_raw = load_raw
+        self.load_instance_only = load_instance_only
+        self.read_normal = read_normal
+        self.file_path = file_path
+        self.chunk_size = split_chunk_size
+        self.gs_cam_format = gs_cam_format
+        self.frame_0_as_canonical = frame_0_as_canonical
+        self.four_view_for_latent = four_view_for_latent  # export 0 12 30 36, 4 views for reconstruction
+        self.overfitting = overfitting
+        self.scene_scale = scene_scale
+        self.reso = reso
+        self.reso_encoder = reso_encoder
+        self.classes = False
+        self.load_depth = load_depth
+        self.preprocess = preprocess
+        self.plucker_embedding = plucker_embedding
+        self.intrinsics = get_intri(h=self.reso, w=self.reso,
+                                    normalize=True).reshape(9)
+        self.perturb_pcd_scale = perturb_pcd_scale
+
+        assert not self.classes, "Not support class condition now."
+
+        dataset_name = Path(self.file_path).stem.split('_')[0]
+        self.dataset_name = dataset_name
+        self.ray_sampler = RaySampler()
+
+        self.zfar = 100.0
+        self.znear = 0.01
+
+        # ! load all chunk paths
+        self.chunk_list = []
+
+        def load_single_cls_instances(file_path):
+            ins_list = []  # the first 1 instance for evaluation reference.
+
+            for dict_dir in os.listdir(file_path)[:]: # ! for debugging
+                for ins_dir in os.listdir(os.path.join(file_path, dict_dir)):
+                    ins_list.append(
+                        os.path.join(file_path, dict_dir, ins_dir,
+                                    'campos_512_v4'))
+            return ins_list
+        
+
+        # ! direclty load from json
+        with open(f'{self.file_path}/dataset.json', 'r') as f:
+            # dataset_json = json.load(f)
+            dataset_json = {'Animals': ['1/0']} 
+
+        if self.chunk_size == 12:
+            self.img_ext = 'png'  # ln3diff
+            for k, v in dataset_json.items():
+                self.chunk_list.extend(v)
+        else:
+            # extract latent
+            assert self.chunk_size in [16,18, 20]
+            self.img_ext = 'jpg'  # more views
+            for k, v in dataset_json.items():
+                # if k != 'BuildingsOutdoor':  # cannot be handled by gs
+                self.chunk_list.extend(v)
+        
+        dataset_size = len(self.chunk_list)
+        self.chunk_list = sorted(self.chunk_list)
+        self.wds_split_all = 1
+
+        if wds_split_all != 1:
+            # ! retrieve the right wds split
+            all_ins_size = len(self.chunk_list)
+            ratio_size = all_ins_size // self.wds_split_all + 1
+            # ratio_size = int(all_ins_size / self.wds_split_all) + 1
+            print('ratio_size: ', ratio_size, 'all_ins_size: ', all_ins_size)
+
+            self.chunk_list = self.chunk_list[ratio_size *
+                                                (wds_split):ratio_size *
+                                                (wds_split + 1)]
+    
+        self.rgb_list = []
+
+    
+        self.post_process = PostProcess(
+            reso,
+            reso_encoder,
+            imgnet_normalize=imgnet_normalize,
+            plucker_embedding=plucker_embedding,
+            decode_encode_img_only=False,
+            mv_input=mv_input,
+            split_chunk_input=split_chunk_size,
+            duplicate_sample=True,
+            append_depth=append_depth,
+            append_xyz=append_xyz,
+            gs_cam_format=gs_cam_format,
+            orthog_duplicate=False,
+            frame_0_as_canonical=frame_0_as_canonical,
+            pcd_path=pcd_path,
+            load_pcd=load_pcd,
+            split_chunk_size=split_chunk_size,
+        )
+        self.kernel = torch.tensor([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+
+        # self.no_bottom = True # avoid loading bottom vew
+
+    def fetch_chunk_list(self, file_path):
+        if os.path.isdir(file_path):
+            chunks = [
+                os.path.join(file_path, fname)
+                for fname in os.listdir(file_path) if fname.isdigit()
+            ]
+            return chunks
+        else:
+            return []
+
+    def _pre_process_chunk(self):
+        # e.g., remove bottom view
+        pass
+
+    def read_chunk(self, chunk_path):
+        # equivalent to decode_zip() in wds
+
+        # reshape chunk
+        raw_img = imageio.imread(
+            os.path.join(chunk_path, f'raw_img.{self.img_ext}'))
+        h, bw, c = raw_img.shape
+        raw_img = raw_img.reshape(h, self.chunk_size, -1, c).transpose(
+            (1, 0, 2, 3))
+        c = np.load(os.path.join(chunk_path, 'c.npy'))
+
+        with open(os.path.join(chunk_path, 'caption.txt'),
+                  'r',
+                  encoding="utf-8") as f:
+            caption = f.read()
+
+        with open(os.path.join(chunk_path, 'ins.txt'), 'r',
+                  encoding="utf-8") as f:
+            ins = f.read()
+
+        bbox = np.load(os.path.join(chunk_path, 'bbox.npy'))
+        
+        # if self.chunk_size > 16:
+
+        depth_alpha = imageio.imread(
+            os.path.join(chunk_path, 'depth_alpha.jpg'))  # 2h 10w
+        depth_alpha = depth_alpha.reshape(h * 2, self.chunk_size,
+                                        -1).transpose((1, 0, 2))
+
+        depth, alpha = np.split(depth_alpha, 2, axis=1)
+
+        d_near_far = np.load(os.path.join(chunk_path, 'd_near_far.npy'))
+
+        d_near = d_near_far[0].reshape(self.chunk_size, 1, 1)
+        d_far = d_near_far[1].reshape(self.chunk_size, 1, 1)
+        # d = 1 / ( (d_normalized / 255) * (far-near) + near)
+        depth = 1 / ((depth / 255) * (d_far - d_near) + d_near)
+
+        depth[depth > 2.9] = 0.0  # background as 0, follow old tradition
+
+        # ! filter anti-alias artifacts
+
+        erode_mask = kornia.morphology.erosion(
+            torch.from_numpy(alpha == 255).float().unsqueeze(1),
+            self.kernel)  # B 1 H W
+        depth = (torch.from_numpy(depth).unsqueeze(1) * erode_mask).squeeze(
+            1)  # shrink anti-alias bug
+
+        # else:
+        #     # load separate alpha and depth map
+
+        #     alpha = imageio.imread(
+        #         os.path.join(chunk_path, f'alpha.{self.img_ext}'))
+        #     alpha = alpha.reshape(h, self.chunk_size, h).transpose(
+        #         (1, 0, 2))            
+        #     depth = np.load(os.path.join(chunk_path, 'depth.npz'))['depth']
+        #     # depth = depth * (alpha==255) # mask out background
+
+
+        if self.read_normal:
+            normal = imageio.imread(os.path.join(
+                chunk_path, 'normal.png')).astype(np.float32) / 255.0
+
+            normal = (normal * 2 - 1).reshape(h, self.chunk_size, -1,
+                                              3).transpose((1, 0, 2, 3))
+            # fix g-buffer normal rendering coordinate
+            # normal = unity2blender(normal) # ! still wrong
+            normal = unity2blender_fix(normal) # ! 
+            depth = (depth, normal)  # ?
+
+        return raw_img, depth, c, alpha, bbox, caption, ins
+
+    def __len__(self):
+        return len(self.chunk_list)
+
+    def __getitem__(self, index) -> Any:
+        sample = self.read_chunk(
+            os.path.join(self.file_path, self.chunk_list[index]))
+        sample = self.post_process.paired_post_process_chunk(sample)
+
+        sample = self.post_process.create_dict_nobatch(sample)
+
+        return sample
+
 
 
 class RealDataset(Dataset):
