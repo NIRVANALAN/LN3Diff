@@ -351,7 +351,7 @@ bash shell_scripts/final_release/inference/sample_ffhq_t23d.sh
 For (Objaverse) stage-1 VAE 3D reconstruction and extract VAE latents for diffusion learning, please run
 
 ```bash
-bash shell_scripts/final_release/inference/sample_obajverse.sh
+bash shell_scripts/final_release/inference/vae_xl_reconstruction.sh
 ```
 
 which shall give the following result:
