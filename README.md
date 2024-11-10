@@ -211,6 +211,8 @@ For cli inference for text-to-3D:
 bash shell_scripts/final_release/inference/sample_obajverse_t23d_dit.sh
 ```
 
+Note that for text-to-3D, please manually change the captions condition in ```./scripts/vit_triplane_diffusion_sample_objaverse.py:189```
+
 ## Download Models manually & ShapeNet models inference
 
 The pretrained checkpoints can be downloaded via [OneDrive](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/ErdRV9hCYvlBioObT1v_LZ4Bnwye3sv6p5qiVZPNhI9coQ?e=YpJ3jz).

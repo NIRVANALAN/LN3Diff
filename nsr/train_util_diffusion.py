@@ -345,7 +345,11 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                     ],
                     dim=-1)  # B, 3, H, W
 
-            if save_img:
+            if save_img or output_dir is not None:
+                if output_dir is None:
+                    output_dir = f'{logger.get_dir()}/FID_Cals/{name_prefix}'
+                    os.makedirs(output_dir, exist_ok=True)
+
                 for batch_idx in range(gen_img.shape[0]):
                     sampled_img = Image.fromarray(
                         (gen_img[batch_idx].permute(1, 2, 0).cpu().numpy() *
@@ -353,10 +357,11 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                     # if sampled_img.size != (512, 512):
                     #     sampled_img = sampled_img.resize(
                     #         (128, 128), Image.HAMMING)  # for shapenet
-                    sampled_img.save(logger.get_dir() +
-                                     '/FID_Cals/{}_{}.png'.format(
-                                         name_prefix, f'{batch_idx}-{i}'))
-                    # print('FID_Cals/{}_{}.png'.format(int(name_prefix)*batch_size+batch_idx, i))
+                    # sampled_img.save(logger.get_dir() +
+                                    #  '/FID_Cals/{}_{}.png'.format(
+                                    #      name_prefix, f'{batch_idx}-{i}'))
+                    sampled_img.save(os.path.join(output_dir, f'{i}.jpg'))
+
 
             vis = pred_vis.permute(0, 2, 3, 1).cpu().numpy()
             vis = vis * 127.5 + 127.5

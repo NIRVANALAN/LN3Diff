@@ -188,11 +188,11 @@ def main(args):
 
         all_prompts_available = [
             # prompts used in the paper:
-            'The Eiffel tower.',  # 0-3
-            'a stone water well with a wooden shed.', # 7 9 15 19 23 24 28
-            'A wooden chest with golden trim', # 3 5 6 7
-            'A plate of sushi.',  # 0 3 7 11 16
             'A blue platic chair', # 0 1 2 3
+            # 'The Eiffel tower.',  # 0-3
+            # 'a stone water well with a wooden shed.', # 7 9 15 19 23 24 28
+            # 'A wooden chest with golden trim', # 3 5 6 7
+            # 'A plate of sushi.',  # 0 3 7 11 16
             # Prompt NOT USED (From Volume diffusion):
             # 'A wooden worktable', 
             # 'An engineer', 
@@ -222,15 +222,17 @@ def main(args):
             # from volumeDiffusion
         ]
 
-        prompts_and_seed_to_render = {
-            'The Eiffel tower.': np.array([20, 19, 18, 31, 26, 25, 22]),  # 0-3
-            'a stone water well with a wooden shed.': np.array([7, 9, 15, 19, 23, 24, 28]),
-            'A wooden chest with golden trim': np.array([3, 5, 6, 7]), 
-            'A plate of sushi.': np.array([0, 3, 7, 11, 16]), 
-            'A blue platic chair': np.array([0, 1, 2, 3]),
-        }
+        # ! for inferring specific seeds
+        # prompts_and_seed_to_render = {
+        #     'The Eiffel tower.': np.array([20, 19, 18, 31, 26, 25, 22]),  # 0-3
+        #     'a stone water well with a wooden shed.': np.array([7, 9, 15, 19, 23, 24, 28]),
+        #     'A wooden chest with golden trim': np.array([3, 5, 6, 7]), 
+        #     'A plate of sushi.': np.array([0, 3, 7, 11, 16]), 
+        #     'A blue platic chair': np.array([0, 1, 2, 3]),
+        # }
 
-        for prompt, seeds in prompts_and_seed_to_render.items():
+        # for prompt, seeds in prompts_and_seed_to_render.items():
+        for prompt in all_prompts_available:
 
             training_loop_class.eval_cldm(
                     # prompt=args.prompt,
