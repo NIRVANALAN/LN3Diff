@@ -132,6 +132,8 @@ Scalable Latent Neural Fields Diffusion for Speedy 3D Generation
 
 ## :mega: Updates
 
+[11/2024] Check our new work, [**GaussianAnything**](https://github.com/NIRVANALAN/GaussianAnything), that resolves some key limitations of LN3Diff and supports high-quality and editable surfel Gaussians through a cascaded native 3D diffusion pipeline.
+
 [10/2024] Further organize the code and support loading checkpoint directly from huggingface.
 
 [08/2024] We have released the ZeroGPU huggingface demo on I23D, please check it on the [Gradio space](https://huggingface.co/spaces/yslan/LN3Diff_I23D). For local run, simply run ```bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh```.
