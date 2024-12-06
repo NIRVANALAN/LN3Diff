@@ -404,7 +404,10 @@ We directly use G-Objaverse rendering images for training, and you may need to d
 
 ### Training Commands
 
-Coming soon.
+We have included the training script for ShapeNet generation in ```./shell_scripts/final_release/train/stage-2-diffusion/shapenet_cldm```. Please change the dataset dir in the bash file and run 
+```bash
+bash ./shell_scripts/final_release/train/stage-2-diffusion/shapenet_cldm/lsgm_[car,chair,plane]_cldm.sh
+```
 
 ## More discussions of the proposed method
 Compared to existing 3D generation framework such as SDS-based ([DreamFusion](https://dreamfusion3d.github.io/)), mulit-view generation-based ([MVDream](https://arxiv.org/abs/2308.16512), [Zero123++](https://github.com/SUDO-AI-3D/zero123plus), [Instant3D](https://instant-3d.github.io/)) and feedforward 3D reconstruction-based ([LRM](https://yiconghong.me/LRM/), [InstantMesh](https://github.com/TencentARC/InstantMesh), [LGM](https://github.com/3DTopia/LGM)), LN3Diff is an origin 3D Diffusion framework. 
