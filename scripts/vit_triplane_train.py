@@ -239,7 +239,7 @@ def training_loop(args):
     TrainLoop = {
         'input_rec': TrainLoop3DRec,
         'nv_rec': TrainLoop3DRecNV,
-        # 'nv_rec_patch': TrainLoop3DRecNVPatch,
+        'nv_rec_patch': TrainLoop3DRecNVPatch,
         'nv_rec_patch': TrainLoop3DRecNVPatchSingleForward,
         'nv_rec_patch_mvE': TrainLoop3DRecNVPatchSingleForwardMV,
         'nv_rec_patch_mvE_disc': TrainLoop3DRecNVPatchSingleForwardMVAdvLoss, # default for objaverse

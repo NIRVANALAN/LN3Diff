@@ -160,7 +160,7 @@ bash shell_scripts/final_release/inference/gradio_sample_obajverse_i23d_dit.sh
 
 ### :dromedary_camel: TODO
 
-- [ ] Polish the dataset preparation and training doc.
+- [x] Polish the dataset preparation and training doc.
 - [x] Add Gradio space demo.
 - [x] Add Gradio local demo.
 - [x] Release the new I23D flow-matching-based DiT model trained with 180K G-Objaverse instances (Aug 2024).
@@ -373,7 +373,7 @@ For more G-buffer Objaverse examples, download the [demo data](https://entuedu-m
 
 
 
-## :running_woman: Training
+## :running_woman: Training (Objaverse)
 
 
 ### For training stage-1 VAE
@@ -383,10 +383,6 @@ We process the data into multi-view chunks for faster loading, and the pre-proce
 
 <!-- A demo subset for stage-1 VAE reconstruction can be downloaded from [here](https://entuedu-my.sharepoint.com/:u:/g/personal/yushi001_e_ntu_edu_sg/Eb6LX2x-EgJLpiHbhRxsN9ABnEaSyjG-tsVBcUr_dQ5dnQ?e=JXWQo1). Note that for Objaverse training, we pre-process the raw data into [wds-dataset](https://github.com/webdataset/webdataset) shards for fast and flexible loading. The sample shard data can be found in [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/ErtZQgnEH5ZItDqdUaiVbJgBe4nhZveJemQRqDW6Xwp7Zg?e=Zqt6Ss). -->
 
-For ShapeNet, we render our own data with foreground mask for training, which can be downloaded from [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EijBXIC_bUNOo0L3wnJKRqoBCqVnhhT_BReYRc1tc_0lrA?e=VQwWOZ). For training, we convert the raw data to LMDB for faster data loading. The pre-processed LMDB file can be downloaded from [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/Ev7L8Als8K9JtLtj1G23Cc0BTNDbhCQPadxNLLVS7mV2FQ?e=C5woyE).
-
-
-For FFHQ, we use the pre-processed dataset from [EG3D](https://github.com/NVlabs/eg3d) and compress it into LMDB, which can also be found in the onedrive link above.
 
 ### For training stage-2 LDM
 
@@ -402,7 +398,22 @@ Please put under ```'./datasets/text_captions_cap3d.json'```
 We directly use G-Objaverse rendering images for training, and you may need to download their data for this experiments.
 
 
-### Training Commands
+## Training Commands (ShapeNet & FFHQ)
+
+For ShapeNet, we render our own data with foreground mask for training, which can be downloaded from [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/EijBXIC_bUNOo0L3wnJKRqoBCqVnhhT_BReYRc1tc_0lrA?e=VQwWOZ). For training, we convert the raw data to LMDB for faster data loading. The pre-processed LMDB file can be downloaded from [here](https://entuedu-my.sharepoint.com/:f:/g/personal/yushi001_e_ntu_edu_sg/Ev7L8Als8K9JtLtj1G23Cc0BTNDbhCQPadxNLLVS7mV2FQ?e=C5woyE).
+
+
+For FFHQ, we use the pre-processed dataset from [EG3D](https://github.com/NVlabs/eg3d) and compress it into LMDB, which can also be found in the onedrive link above.
+
+### 3D VAE Training
+Please check the shell scripts in ```shell_scripts/final_release/train/stage-1-vae/ShapeNet```. For example,
+```bash
+bash shell_scripts/final_release/train/stage-1-vae/ShapeNet/car_vae.sh
+```
+
+Kindly change the ```${data_dir}``` to your LMDB file path. 
+
+### Latent Diffusion Training
 
 We have included the training script for ShapeNet generation in ```./shell_scripts/final_release/train/stage-2-diffusion/shapenet_cldm```. Please change the dataset dir in the bash file and run 
 ```bash
