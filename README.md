@@ -431,7 +431,7 @@ If you find our work useful for your research, please consider citing the paper:
 ```
 @inproceedings{lan2024ln3diff,
     title={LN3Diff: Scalable Latent Neural Fields Diffusion for Speedy 3D Generation}, 
-    author={Yushi Lan and Fangzhou Hong and Shuai Yang and Shangchen Zhou and Xuyi Meng and Bo Dai and Xingang Pan and Chen Change Loy},
+    author={Lan, Yushi and Hong, Fangzhou and Yang, Shuai and Zhou, Shangchen and Meng, Xuyi and Dai, Bo and Pan, Xingang and Loy, Chen Change},
     year={2024},
     booktitle={ECCV},
 }
