@@ -345,7 +345,7 @@ class TrainLoopDiffusionWithRec(TrainLoop):
                     ],
                     dim=-1)  # B, 3, H, W
 
-            if save_img or output_dir is not None:
+            if save_img:
                 if output_dir is None:
                     output_dir = f'{logger.get_dir()}/FID_Cals/{name_prefix}'
                     os.makedirs(output_dir, exist_ok=True)
